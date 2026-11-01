@@ -757,7 +757,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                 </button>
 
                 <p className="text-[11.5px] text-[#556058] text-center leading-relaxed px-2">
-                  By submitting your recording, you agree to share it for listening in the Edo Language Studio Library. Your voice will not be used for AI training.
+                  By submitting your recording, you agree to share it for listening in the Community Library. Your voice will not be used for AI training.
                 </p>
 
                 {/* Save Voice / Save and Continue Button */}

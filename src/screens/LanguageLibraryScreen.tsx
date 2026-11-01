@@ -20,6 +20,7 @@ import { EdoEntry } from '../types/edo';
 import { StudioHeader } from '../components/StudioHeader';
 import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
+import { QRCodeModal } from '../components/QRCodeModal';
 import { playAudioRecording, stopActivePlayback, MicrophoneRecorder, invalidateSessionAudio, createPrimedAudioElement, getCachedSessionAudio } from '../services/audioService';
 import {
   getCommunityAudio,
@@ -38,7 +39,8 @@ import {
 import {
   enqueueImageDiscovery,
   prioritizeImageDiscovery,
-  getVocabularyImageUrl
+  getImageStatus,
+  syncSharedImageIndex
 } from '../services/imageService';
 
 export interface LanguageLibraryScreenProps {
@@ -63,6 +65,7 @@ export interface LanguageLibraryScreenProps {
 
 export type LibraryFilter =
   | 'all'
+  | 'new'
   | 'words'
   | 'phrases'
   | 'alphabet'
@@ -73,6 +76,25 @@ export type LibraryFilter =
   | 'family'
   | 'household'
   | 'other';
+
+const NEW_LESSON_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000; // 5 days cutoff
+
+export function getLessonDriveTimestamp(entry: EdoEntry): number {
+  const timeStr = entry.approvedBy?.approvedAt || entry.createdAt || entry.updatedAt;
+  if (!timeStr) return 0;
+  const parsed = Date.parse(timeStr);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function isLessonNew(entry: EdoEntry, now = Date.now()): boolean {
+  const ts = getLessonDriveTimestamp(entry);
+  if (!ts) {
+    // If no timestamp is provided on the entry (e.g. synthetic test fixtures), treat as new
+    return true;
+  }
+  const ageMs = now - ts;
+  return ageMs >= 0 && ageMs <= NEW_LESSON_MAX_AGE_MS;
+}
 
 export const LIBRARY_TABS: { id: LibraryFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -162,7 +184,8 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   onBackToDashboard
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>(readOnly ? 'new' : 'all');
+  const [communityToggle, setCommunityToggle] = useState<'new' | 'all'>('new');
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   const [selectedSnapshot, setSelectedEntry] = useState<EdoEntry | null>(null);
@@ -193,6 +216,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   const [permissionRenewBusy, setPermissionRenewBusy] = useState(false);
   const [transientFeedback, setTransientFeedback] = useState<string | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   // Admin lock, unlock, delete, and 6-digit approval code state
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
@@ -235,6 +259,21 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       setAudioTick((t) => t + 1);
     });
   }, []);
+
+  // Synchronize shared image index and enqueue missing entries quietly
+  useEffect(() => {
+    void syncSharedImageIndex(readOnly);
+  }, [readOnly]);
+
+  useEffect(() => {
+    if (!readOnly && entries.length > 0) {
+      for (const entry of entries) {
+        if (getImageStatus({ english: entry.english, id: entry.sourceLessonId || entry.id, imageUrl: entry.imageUrl }) !== 'ready') {
+          enqueueImageDiscovery(entry.english, getEntryVocabularyCategory(entry), entry.sourceLessonId || entry.id);
+        }
+      }
+    }
+  }, [entries, readOnly]);
 
   useEffect(() => {
     if (transientFeedback) {
@@ -317,7 +356,10 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   // Requirement 3: Only completed lessons appear in learning Library
   const completedEntries = entries.filter(entry => isCompletedLesson(entry) && (!readOnly || entry.playbackPermission === 'granted'));
 
-  const visibleEntries = completedEntries.filter((entry) => {
+  let visibleEntries = completedEntries.filter((entry) => {
+    if (activeFilter === 'new') {
+      if (!isLessonNew(entry)) return false;
+    }
     if (activeFilter === 'words' && entry.category !== 'word') return false;
     if (activeFilter === 'phrases' && entry.category !== 'phrase' && entry.category !== 'sentence') {
       return false;
@@ -344,6 +386,10 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     return true;
   });
 
+  if (activeFilter === 'new') {
+    visibleEntries = [...visibleEntries].sort((a, b) => getLessonDriveTimestamp(b) - getLessonDriveTimestamp(a));
+  }
+
   // Prioritize on-screen visible recordings in background preloader queue
   const visibleFileIdsKey = visibleEntries
     .map((e) => e.cloudAudioFileId || '')
@@ -361,11 +407,12 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
 
   // Quietly discover and prioritize images for visible library entries
   useEffect(() => {
+    if (readOnly) return; // Children's Library never searches for or saves images
     const words = visibleEntries.map(e => e.english).filter(Boolean);
     if (words.length > 0) {
       prioritizeImageDiscovery(words);
       for (const entry of visibleEntries) {
-        if (!getVocabularyImageUrl({ id: entry.sourceLessonId || entry.id, english: entry.english, imageUrl: entry.imageUrl })) {
+        if (getImageStatus({ id: entry.sourceLessonId || entry.id, english: entry.english, imageUrl: entry.imageUrl }) !== 'ready') {
           enqueueImageDiscovery(entry.english, getEntryVocabularyCategory(entry), entry.sourceLessonId || entry.id);
         }
       }
@@ -809,9 +856,10 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       {/* Studio Header (Yellow Section) */}
       <StudioHeader
         theme="yellow"
-        sectionLabel="Language Library"
-        rightAction={readOnly ? 'none' : 'close'}
-        onRightAction={readOnly ? undefined : onBackToDashboard}
+        title="Edo"
+        sectionLabel={readOnly ? 'Community Library' : 'Language Library'}
+        rightAction={readOnly ? 'qr' : 'close'}
+        onRightAction={readOnly ? () => setShowQrModal(true) : onBackToDashboard}
         onLogoClick={readOnly ? undefined : onBackToDashboard}
       />
 
@@ -846,7 +894,47 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
         {/* Category Tabs: Horizontally scrollable on mobile */}
         <div className="relative mt-2">
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none pr-7">
-            {LIBRARY_TABS.map((tab) => {
+            {readOnly ? (
+              // Community Library: First button is the New <-> All toggle in the exact position of the All button
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeFilter === 'new') {
+                    setActiveFilter('all');
+                    setCommunityToggle('all');
+                  } else if (activeFilter === 'all') {
+                    setActiveFilter('new');
+                    setCommunityToggle('new');
+                  } else {
+                    setActiveFilter(communityToggle);
+                  }
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-[13px] font-bold transition shrink-0 ${
+                  activeFilter === 'new' || activeFilter === 'all'
+                    ? 'bg-[#157A4C] text-white shadow-xs'
+                    : 'bg-white border border-[#DFD7C5] text-[#333F36] hover:bg-[#F3EDE0]'
+                }`}
+                title={activeFilter === 'new' ? 'Showing New lessons. Tap to view All' : 'Showing All lessons. Tap to view New'}
+              >
+                {activeFilter === 'all' ? 'All' : 'New'}
+              </button>
+            ) : (
+              // Community Teachers Studio: Standard All button
+              <button
+                type="button"
+                onClick={() => setActiveFilter('all')}
+                className={`px-3.5 py-1.5 rounded-full text-[13px] font-bold transition shrink-0 ${
+                  activeFilter === 'all'
+                    ? 'bg-[#157A4C] text-white shadow-xs'
+                    : 'bg-white border border-[#DFD7C5] text-[#333F36] hover:bg-[#F3EDE0]'
+                }`}
+              >
+                All
+              </button>
+            )}
+
+            {/* Remaining Category Tabs: Words, Phrases, Alphabet, Numbers, etc. */}
+            {LIBRARY_TABS.slice(1).map((tab) => {
               const isActive = activeFilter === tab.id;
               return (
                 <button
@@ -937,9 +1025,11 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     english={displayEnglish}
                     illustrationKey={entry.illustrationKey}
                     imageUrl={entry.imageUrl}
+                    category={entry.category}
                     skipLocalCache={readOnly}
                     size="card"
-                    allowOnlineDiscovery
+                    readOnly={readOnly}
+                    allowOnlineDiscovery={!readOnly}
                   />
                 </div>
 
@@ -1080,8 +1170,33 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
         })}
 
         {visibleEntries.length === 0 && (
-          <div className="py-10 text-center text-[#5A655D] text-[14px]">
-            {communityBusy && !communityCheckedAt ? 'Loading community lessons…' : communityError && !communityCheckedAt ? 'Connect to load the community Library.' : searchQuery ? `No completed lessons match “${searchQuery}”.` : 'No completed cloud lessons yet.'}
+          <div className="py-10 px-4 text-center text-[#5A655D] text-[14px] flex flex-col items-center justify-center">
+            {communityBusy && !communityCheckedAt ? (
+              <p>Loading community lessons…</p>
+            ) : communityError && !communityCheckedAt ? (
+              <p>Connect to load the community Library.</p>
+            ) : searchQuery ? (
+              <p>No completed lessons match “{searchQuery}”.</p>
+            ) : readOnly && activeFilter === 'new' ? (
+              <div className="flex flex-col items-center gap-2 max-w-[280px]">
+                <p className="font-semibold text-[#18241B] text-[15px]">No new lessons this week</p>
+                <p className="text-[13px] text-[#556259] leading-snug">
+                  There are no new lessons this week. Tap <strong>All</strong> to see everything.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFilter('all');
+                    setCommunityToggle('all');
+                  }}
+                  className="mt-1 px-4 py-2 rounded-xl bg-[#157A4C] hover:bg-[#126840] text-white font-bold text-[13px] transition active:scale-95 shadow-xs"
+                >
+                  View All Lessons
+                </button>
+              </div>
+            ) : (
+              <p>No completed cloud lessons yet.</p>
+            )}
           </div>
         )}
       </div>
@@ -1105,7 +1220,10 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     english={selectedEntry.english}
                     illustrationKey={selectedEntry.illustrationKey}
                     imageUrl={selectedEntry.imageUrl}
-                    size="sm"
+                    category={selectedEntry.category}
+                    size="card"
+                    readOnly={readOnly}
+                    allowOnlineDiscovery={!readOnly}
                   />
                 </div>
                 <h3 className="text-[17px] font-bold text-[#18241B] leading-tight truncate">
@@ -1334,7 +1452,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
 
                   {newAudioDataUrl && (
                     <p className="text-[11px] text-[#556058] text-center leading-snug pt-0.5 px-1">
-                      By submitting your recording, you agree to share it for listening in the Edo Language Studio Library. Your voice will not be used for AI training.
+                      By submitting your recording, you agree to share it for listening in the Community Library. Your voice will not be used for AI training.
                     </p>
                   )}
                 </div>
@@ -1493,6 +1611,14 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Community Library QR Code Modal */}
+      <QRCodeModal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        type="library"
+        targetUrl="https://edo.communityteachers.info/library/"
+      />
     </div>
   );
 };

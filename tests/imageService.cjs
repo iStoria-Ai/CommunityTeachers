@@ -119,6 +119,64 @@ assert.equal(getEntryVocabularyCategory({ english: 'God', id: 'cloud-8', categor
 
 console.log('✓ Confirmed category tab classification across Animals, Family, Body, Food, Household, Alphabet, Numbers, and Other.');
 
+// 8. Verify Smart Image Detection & Status Management
+const imageServiceBundle = buildSync({
+  entryPoints: ['src/services/imageService.ts'],
+  bundle: true,
+  write: false,
+  platform: 'node',
+  format: 'cjs',
+  external: ['@capacitor/*']
+}).outputFiles[0].text;
+
+const imgMod = { exports: {} };
+vm.runInNewContext(imageServiceBundle, {
+  module: imgMod,
+  exports: imgMod.exports,
+  console,
+  setTimeout,
+  clearTimeout,
+  require: () => ({ Capacitor: { isNativePlatform: () => false } }),
+  fetch: async () => ({ ok: false }),
+  localStorage: { getItem: () => null, setItem: () => {} },
+  navigator: { onLine: true }
+});
+
+const { getImageStatus, getVocabularyImageUrl, retryImageDownload, subscribeImageUpdates } = imgMod.exports;
+
+// Test 8a: Existing working images such as Dog and Birds return 'ready'
+assert.equal(getImageStatus({ english: 'Dog' }), 'ready', 'Existing image "Dog" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Birds' }), 'ready', 'Existing image "Birds" must have status "ready"');
+assert.equal(getImageStatus({ english: 'God' }), 'ready', 'Existing curated image "God" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Nursing Mother' }), 'ready', 'Existing curated image "Nursing Mother" must have status "ready"');
+assert.ok(getVocabularyImageUrl({ english: 'Dog' }).includes('animal-dog.jpg'), 'Dog must resolve to bundled asset');
+assert.ok(getVocabularyImageUrl({ english: 'Birds' }).includes('animal-bird.jpg'), 'Birds must resolve to bundled asset');
+console.log('✓ Verified working images (Dog, Birds, God, Nursing Mother) return status "ready" immediately without searching.');
+
+// Test 8b: Missing images such as Pig and Teeth return 'missing'
+assert.equal(getImageStatus({ english: 'Pig' }), 'missing', 'Unbundled item "Pig" must return status "missing"');
+assert.equal(getImageStatus({ english: 'Teeth' }), 'missing', 'Unbundled item "Teeth" must return status "missing"');
+console.log('✓ Verified unbundled/missing images (Pig, Teeth) start with status "missing".');
+
+// Test 8c: Real-time status subscription and single-item retry
+let receivedStatus = '';
+const unsubscribe = subscribeImageUpdates((norm, url, status) => {
+  if (norm === 'pig') {
+    receivedStatus = status;
+  }
+});
+
+// Calling retry on Pig emits 'downloading'
+const retryPromise = retryImageDownload('Pig', 'Animals');
+assert.equal(getImageStatus({ english: 'Pig' }), 'downloading', 'In-flight retry must report status "downloading"');
+assert.equal(receivedStatus, 'downloading', 'Status update listener must receive "downloading" event');
+unsubscribe();
+
+// Ensure other images like Teeth and Dog remain unaffected
+assert.equal(getImageStatus({ english: 'Teeth' }), 'missing', 'Other missing images must remain unaffected');
+assert.equal(getImageStatus({ english: 'Dog' }), 'ready', 'Existing images must remain unaffected');
+console.log('✓ Verified single-item retry: retrying "Pig" does not affect "Teeth" or "Dog".');
+
 console.log(`✓ All ${verifiedCount} starter asset files are present. File size does not verify the pictured subject.`);
-console.log('=== BUNDLED VOCABULARY ASSET PRESENCE TESTS PASSED (semantic checks are separate) ===\n');
+console.log('=== BUNDLED VOCABULARY ASSET & SMART IMAGE DETECTION TESTS PASSED ===\n');
 

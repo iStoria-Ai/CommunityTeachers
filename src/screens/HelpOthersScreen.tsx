@@ -563,7 +563,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
             <div className="flex flex-col gap-2.5 pt-2">
               {capturedAudioUrl && (
                 <p className="text-[11.5px] text-[#556058] text-center leading-relaxed px-1">
-                  By submitting your recording, you agree to share it for listening in the Edo Language Studio Library. Your voice will not be used for AI training.
+                  By submitting your recording, you agree to share it for listening in the Community Library. Your voice will not be used for AI training.
                 </p>
               )}
               <button

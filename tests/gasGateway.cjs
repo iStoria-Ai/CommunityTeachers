@@ -22,20 +22,14 @@ function createMockDrive() {
   const folders = new Map();
   const files = new Map();
 
-  // Root Target Folder
-  folders.set(TARGET_FOLDER_ID, {
-    id: TARGET_FOLDER_ID,
-    name: 'Edo Language Studio',
-    files: []
-  });
-
   function makeBlob(bytes, mimeType, name) {
     const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || '', 'utf8');
     return {
       getBytes: () => buffer,
       getDataAsString: () => buffer.toString('utf8'),
       getContentType: () => mimeType || 'application/octet-stream',
-      getName: () => name || 'blob'
+      getName: () => name || 'blob',
+      setName: function(n) { name = n; return this; }
     };
   }
 
@@ -59,15 +53,19 @@ function createMockDrive() {
       setTrashed: (t) => {
         file.trashed = Boolean(t);
       },
+      setSharing: () => {},
+      getMimeType: () => file.mimeType || 'application/octet-stream',
       getParents: () => {
         let done = false;
         return {
           hasNext: () => !done && !file.trashed,
           next: () => {
             done = true;
-            return {
+            const parent = folders.get(file.parentFolderId);
+            return parent || {
               getId: () => file.parentFolderId,
-              getName: () => 'Edo Language Studio'
+              getName: () => 'Edo Language Studio',
+              getParents: () => ({ hasNext: () => false, next: () => null })
             };
           }
         };
@@ -77,30 +75,66 @@ function createMockDrive() {
     return file;
   }
 
+  function makeFolder(id, name, parentId = null) {
+    const fObj = {
+      getId: () => id,
+      getName: () => name,
+      getParentId: () => parentId,
+      getParents: () => {
+        let done = false;
+        return {
+          hasNext: () => !done && parentId !== null,
+          next: () => {
+            done = true;
+            return folders.get(parentId);
+          }
+        };
+      },
+      createFile: (blob) => createFile(blob, id),
+      createFolder: (subName) => {
+        const subId = 'folder-' + Math.random().toString(36).substring(2, 9);
+        const subFolder = makeFolder(subId, subName, id);
+        folders.set(subId, subFolder);
+        return subFolder;
+      },
+      getFoldersByName: (subName) => {
+        const matching = Array.from(folders.values()).filter(f => f.getParentId() === id && f.getName() === subName);
+        let idx = 0;
+        return {
+          hasNext: () => idx < matching.length,
+          next: () => matching[idx++]
+        };
+      },
+      getFilesByName: (fileName) => {
+        const matching = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === id && f.name === fileName);
+        let idx = 0;
+        return {
+          hasNext: () => idx < matching.length,
+          next: () => matching[idx++]
+        };
+      },
+      getFiles: () => {
+        const all = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === id);
+        let idx = 0;
+        return {
+          hasNext: () => idx < all.length,
+          next: () => all[idx++]
+        };
+      }
+    };
+    return fObj;
+  }
+
+  const rootFolder = makeFolder(TARGET_FOLDER_ID, 'Edo Language Studio', null);
+  folders.set(TARGET_FOLDER_ID, rootFolder);
+
   const driveApp = {
+    Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
+    Permission: { VIEW: 'VIEW' },
     getFolderById: (id) => {
-      if (id !== TARGET_FOLDER_ID) throw new Error('Folder not found: ' + id);
-      return {
-        getId: () => TARGET_FOLDER_ID,
-        getName: () => 'Edo Language Studio',
-        createFile: (blob) => createFile(blob, TARGET_FOLDER_ID),
-        getFilesByName: (fileName) => {
-          const matching = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === TARGET_FOLDER_ID && f.name === fileName);
-          let idx = 0;
-          return {
-            hasNext: () => idx < matching.length,
-            next: () => matching[idx++]
-          };
-        },
-        getFiles: () => {
-          const all = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === TARGET_FOLDER_ID);
-          let idx = 0;
-          return {
-            hasNext: () => idx < all.length,
-            next: () => all[idx++]
-          };
-        }
-      };
+      const f = folders.get(id);
+      if (!f) throw new Error('Folder not found: ' + id);
+      return f;
     },
     getFileById: (id) => {
       const file = files.get(id);
@@ -194,12 +228,27 @@ function runTests() {
 
   // Setup VM sandbox with Code.gs code
   const codeGsSource = fs.readFileSync(path.join(__dirname, '../gas/Code.gs'), 'utf8');
+  const JPEG_BYTES = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(300, 7)]);
+  const fetchCalls = [];
+  const fetchResponses = new Map(); // url -> { code, bytes }
+  const urlFetchApp = {
+    fetch: (url, opts) => {
+      fetchCalls.push({ url, opts });
+      const configured = fetchResponses.get(url) || { code: 200, bytes: JPEG_BYTES };
+      return {
+        getResponseCode: () => configured.code,
+        getContent: () => configured.bytes,
+        getBlob: () => makeBlob(configured.bytes, 'image/jpeg', 'mock_image.jpg')
+      };
+    }
+  };
   const sandbox = {
     DriveApp: driveApp,
     PropertiesService: propertiesService,
     CacheService: cacheService,
     LockService: lockService,
     Utilities: utilities,
+    UrlFetchApp: urlFetchApp,
     ContentService: contentService,
     HtmlService: {
       createHtmlOutput: (html) => ({
@@ -1090,6 +1139,132 @@ function runTests() {
   assert(libAfterDel.tombstones.includes('rec-autolock-01'), 'Tombstone must be broadcast to client devices');
   assert(!libAfterDel.answeredQuestionIds.includes('word-autolock-01'), 'Administrator deletion returns question to available pool when no other contribution answers it');
   console.log('✓ Admin authoritative deletion, tombstones, and question pool return verified.');
+
+  // 14. Shared Google Drive Image Library, Index & Streaming (security-hardened)
+  console.log('--- Step 14: Testing Shared Google Drive Image Index & Operations ---');
+  const post = (payload) => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(payload) } }).getContent());
+  const rootFolder = driveApp.getFolderById(TARGET_FOLDER_ID);
+  const imagesFolderExists = () => rootFolder.getFoldersByName('Edo Language Studio Images').hasNext();
+  const snapshotFiles = () => new Map(Array.from(files.values()).map(f => [f.id, { name: f.name, trashed: f.trashed, bytes: Buffer.from(f.blob.getBytes()).toString('base64') }]));
+
+  // 14a: get_image_index is strictly read-only — creates nothing when the folder is missing
+  assert.equal(imagesFolderExists(), false, 'Images folder must not exist before any save');
+  const fileCountBeforeIndex = files.size;
+  const initialIndexResp = post({ action: 'get_image_index' });
+  assert.equal(initialIndexResp.status, 'success');
+  assert.equal(typeof initialIndexResp.index.images, 'object');
+  assert.equal(Object.keys(initialIndexResp.index.images).length, 0);
+  assert.equal(imagesFolderExists(), false, 'get_image_index must never create the Images folder');
+  assert.equal(files.size, fileCountBeforeIndex, 'get_image_index must never create files');
+  console.log('✓ get_image_index is read-only: no folder or index file created.');
+
+  // 14b: Public direct (base64) uploads are rejected
+  const base64Resp = post({ action: 'save_vocabulary_image', english: 'Pig', imageBase64: JPEG_BYTES.toString('base64'), mimeType: 'image/jpeg' });
+  assert.equal(base64Resp.status, 'error');
+  assert.equal(base64Resp.code, 'UPLOAD_NOT_ALLOWED');
+  console.log('✓ Public base64 image upload rejected.');
+
+  // 14c: Non-allow-listed sources are rejected without any network fetch
+  const fetchCountBefore = fetchCalls.length;
+  for (const badUrl of [
+    'https://evil.example.com/pig.jpg',
+    'http://upload.wikimedia.org/pig.jpg',
+    'https://upload.wikimedia.org.evil.com/pig.jpg',
+    'https://user@upload.wikimedia.org/pig.jpg',
+    'https://127.0.0.1/pig.jpg',
+    'javascript:alert(1)'
+  ]) {
+    const r = post({ action: 'save_vocabulary_image', english: 'Pig', sourceUrl: badUrl });
+    assert.equal(r.status, 'error', 'Must reject ' + badUrl);
+    assert.equal(r.code, 'SOURCE_NOT_ALLOWED', 'Must reject ' + badUrl);
+  }
+  assert.equal(fetchCalls.length, fetchCountBefore, 'Rejected sources must never be fetched');
+  assert.equal(imagesFolderExists(), false, 'Rejected saves must not create the Images folder');
+  console.log('✓ Non-Wikimedia, plain-http and spoofed hosts rejected without fetching.');
+
+  // 14d: Non-image content and oversized content are rejected
+  const htmlUrl = 'https://upload.wikimedia.org/wikipedia/commons/fake_html.jpg';
+  fetchResponses.set(htmlUrl, { code: 200, bytes: Buffer.from('<html><body>not an image at all</body></html>') });
+  const htmlResp = post({ action: 'save_vocabulary_image', english: 'Cat', sourceUrl: htmlUrl });
+  assert.equal(htmlResp.code, 'NOT_AN_IMAGE');
+  const bigUrl = 'https://upload.wikimedia.org/wikipedia/commons/huge.jpg';
+  fetchResponses.set(bigUrl, { code: 200, bytes: Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF]), Buffer.alloc(2 * 1024 * 1024)]) });
+  const bigResp = post({ action: 'save_vocabulary_image', english: 'Goat', sourceUrl: bigUrl });
+  assert.equal(bigResp.code, 'IMAGE_TOO_LARGE');
+  assert.equal(imagesFolderExists(), false, 'Invalid content must not create the Images folder');
+  console.log('✓ Non-image (fake .jpg) and oversized content rejected; nothing saved.');
+
+  // 14e: Valid Wikimedia JPEG for "Pig" is saved into the Images subfolder only
+  const rootFilesBefore = Array.from(files.values()).filter(f => f.parentFolderId === TARGET_FOLDER_ID).length;
+  const savePigResp = post({ action: 'save_vocabulary_image', english: 'Pig', category: 'Animals', sourceUrl: 'https://upload.wikimedia.org/wikipedia/commons/pig.jpg', mimeType: 'text/html' });
+  assert.equal(savePigResp.status, 'success', JSON.stringify(savePigResp));
+  assert.equal(savePigResp.duplicate, false);
+  assert.equal(savePigResp.entry.normEnglish, 'pig');
+  assert.equal(savePigResp.entry.status, 'ready');
+  const pigFile = files.get(savePigResp.entry.fileId);
+  assert.equal(pigFile.mimeType, 'image/jpeg', 'Stored MIME type comes from magic bytes, not the caller');
+  assert.ok(Buffer.from(pigFile.blob.getBytes()).equals(JPEG_BYTES), 'Stored bytes must be the exact binary image');
+  const imagesFolder = rootFolder.getFoldersByName('Edo Language Studio Images').next();
+  assert.equal(pigFile.parentFolderId, imagesFolder.getId(), 'Image must live in the Images subfolder');
+  assert.equal(Array.from(files.values()).filter(f => f.parentFolderId === TARGET_FOLDER_ID).length, rootFilesBefore, 'No files added to the original lesson folder');
+  console.log('✓ Valid Wikimedia image for "Pig" saved as exact binary in the Images subfolder only.');
+
+  // 14f: Re-saving returns the existing entry; original bytes untouched; no new files
+  const beforeDup = snapshotFiles();
+  const dupPigResp = post({ action: 'save_vocabulary_image', english: 'Pig', sourceUrl: 'https://upload.wikimedia.org/wikipedia/commons/other_pig.jpg' });
+  assert.equal(dupPigResp.status, 'success');
+  assert.equal(dupPigResp.duplicate, true);
+  assert.equal(dupPigResp.entry.fileId, savePigResp.entry.fileId);
+  assert.deepEqual(snapshotFiles(), beforeDup, 'Duplicate save must not modify or create any file');
+  console.log('✓ Duplicate save returns existing image; no file created or modified.');
+
+  // 14g: A same-named file not in the index is never overwritten
+  const strayBytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47]), Buffer.alloc(100, 3)]);
+  const strayFile = imagesFolder.createFile(makeBlob(strayBytes, 'image/jpeg', 'image_teeth.jpg'));
+  const saveTeethResp = post({ action: 'save_vocabulary_image', english: 'Teeth', category: 'Human Body', sourceUrl: 'https://upload.wikimedia.org/wikipedia/commons/teeth.jpg' });
+  assert.equal(saveTeethResp.status, 'success', JSON.stringify(saveTeethResp));
+  assert.notEqual(saveTeethResp.entry.fileId, strayFile.getId(), 'Must save a new file instead of overwriting');
+  assert.ok(Buffer.from(files.get(strayFile.getId()).blob.getBytes()).equals(strayBytes), 'Existing same-named file bytes must be unchanged');
+  console.log('✓ Existing same-named file preserved byte-for-byte; new image saved alongside.');
+
+  // 14h: Per-word cooldown blocks repeated attempts for a word that failed
+  const failUrl = 'https://upload.wikimedia.org/wikipedia/commons/missing_frog.jpg';
+  fetchResponses.set(failUrl, { code: 404, bytes: Buffer.alloc(0) });
+  assert.equal(post({ action: 'save_vocabulary_image', english: 'Frog', sourceUrl: failUrl }).code, 'DOWNLOAD_FAILED');
+  const fetchesAfterFirstFrog = fetchCalls.length;
+  assert.equal(post({ action: 'save_vocabulary_image', english: 'Frog', sourceUrl: failUrl }).code, 'RATE_LIMIT_EXCEEDED');
+  assert.equal(fetchCalls.length, fetchesAfterFirstFrog, 'Cooldown must block the fetch');
+  console.log('✓ Per-word cooldown prevents repeated download attempts.');
+
+  // 14i: Shared index contains Pig and Teeth for all devices
+  const updatedIndexResp = post({ action: 'get_image_index' });
+  assert.equal(updatedIndexResp.index.images.pig.status, 'ready');
+  assert.equal(updatedIndexResp.index.images.teeth.status, 'ready');
+  assert.ok(!updatedIndexResp.index.images.cat && !updatedIndexResp.index.images.frog, 'Failed saves must not appear in the index');
+  console.log('✓ Shared image index contains only verified entries.');
+
+  // 14j: stream_image serves vocabulary images only
+  const streamResp = post({ action: 'stream_image', fileId: savePigResp.entry.fileId });
+  assert.equal(streamResp.status, 'success');
+  assert.ok(streamResp.imageDataUrl.startsWith('data:image/jpeg;base64,'));
+  const recAudioFile = Array.from(files.values()).find(f => !f.trashed && f.parentFolderId === TARGET_FOLDER_ID && /^audio\//.test(f.mimeType));
+  const recMetaFile = Array.from(files.values()).find(f => !f.trashed && f.parentFolderId === TARGET_FOLDER_ID && f.name.endsWith('_meta.json'));
+  assert.ok(recAudioFile && recMetaFile, 'Test setup requires an existing recording and metadata file');
+  const rootImage = rootFolder.createFile(makeBlob(JPEG_BYTES, 'image/jpeg', 'root_image.jpg'));
+  const indexFileObj = imagesFolder.getFilesByName('edo_image_index.json').next();
+  for (const [label, id] of [['audio recording', recAudioFile.getId()], ['metadata', recMetaFile.getId()], ['root-folder image', rootImage.getId()], ['image index JSON', indexFileObj.getId()]]) {
+    const r = post({ action: 'stream_image', fileId: id });
+    assert.equal(r.status, 'error', 'stream_image must refuse ' + label);
+    assert.equal(r.code, 'ACCESS_DENIED', 'stream_image must refuse ' + label);
+    assert.ok(!r.imageDataUrl, 'No data may be returned for ' + label);
+  }
+  rootImage.setTrashed(true);
+  console.log('✓ stream_image refuses recordings, metadata, root-folder files and the index.');
+
+  // 14k: The original folder check is unchanged: files in the Images subfolder are NOT studio lesson files
+  assert.equal(sandbox.isFileInStudioFolder(pigFile), false, 'Images subfolder files must not pass the lesson-folder check');
+  assert.equal(sandbox.isFileInStudioFolder(recAudioFile), true, 'Recordings must still pass the lesson-folder check');
+  console.log('✓ Lesson-folder security check restored to direct children only.');
 
   // Test doGet health check (tokens are never accepted in GET URLs)
   const healthGet = JSON.parse(sandbox.doGet({}).getContent());

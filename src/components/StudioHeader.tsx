@@ -1,12 +1,13 @@
 import React from 'react';
-import { X, Settings, Search } from 'lucide-react';
+import { X, Settings, Search, QrCode } from 'lucide-react';
 
 export type HeaderTheme = 'default' | 'green' | 'blue' | 'yellow' | 'purple';
 
 interface StudioHeaderProps {
   theme?: HeaderTheme;
+  title?: string;
   sectionLabel?: string;
-  rightAction?: 'close' | 'settings' | 'search' | 'none';
+  rightAction?: 'close' | 'settings' | 'search' | 'qr' | 'none';
   onRightAction?: () => void;
   onLogoClick?: () => void;
 }
@@ -44,6 +45,7 @@ const THEME_STYLES: Record<
 
 export const StudioHeader: React.FC<StudioHeaderProps> = ({
   theme = 'default',
+  title = 'Edo',
   sectionLabel,
   rightAction = 'none',
   onRightAction,
@@ -76,7 +78,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-[18.5px] font-bold tracking-tight text-[#18241B] leading-tight truncate">
-              Edo Language Studio
+              {title}
             </span>
             {sectionLabel && (
               <span
@@ -93,16 +95,28 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
         </div>
 
         {rightAction !== 'none' ? (
-          <button
-            type="button"
-            onClick={onRightAction}
-            aria-label={rightAction}
-            className="w-[42px] h-[42px] rounded-full flex items-center justify-center text-[#2E3A31] hover:bg-[#EFE9DA] active:scale-95 transition shrink-0"
-          >
-            {rightAction === 'close' && <X className="w-6 h-6 stroke-[2.2]" />}
-            {rightAction === 'settings' && <Settings className="w-5 h-5 stroke-[2.1]" />}
-            {rightAction === 'search' && <Search className="w-5 h-5 stroke-[2.2]" />}
-          </button>
+          rightAction === 'qr' ? (
+            <button
+              type="button"
+              onClick={onRightAction}
+              title="Open QR Code"
+              aria-label="Open QR Code"
+              className="w-[38px] h-[38px] rounded-xl bg-white border border-[#E0D8C6] shadow-2xs flex items-center justify-center text-[#2E3A31] hover:bg-[#F3EDE0] active:scale-95 transition shrink-0"
+            >
+              <QrCode className="w-5 h-5 stroke-[2.1]" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onRightAction}
+              aria-label={rightAction}
+              className="w-[42px] h-[42px] rounded-full flex items-center justify-center text-[#2E3A31] hover:bg-[#EFE9DA] active:scale-95 transition shrink-0"
+            >
+              {rightAction === 'close' && <X className="w-6 h-6 stroke-[2.2]" />}
+              {rightAction === 'settings' && <Settings className="w-5 h-5 stroke-[2.1]" />}
+              {rightAction === 'search' && <Search className="w-5 h-5 stroke-[2.2]" />}
+            </button>
+          )
         ) : (
           <div className="w-[42px] h-[42px] shrink-0" />
         )}

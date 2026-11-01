@@ -998,3 +998,120 @@ export async function fetchDriveCollectionStats(url = getGatewayUrl()): Promise<
   }
   return { stats: data.stats, checkedAt: String(data.checkedAt || new Date().toISOString()) };
 }
+
+export interface CloudImageEntry {
+  vocabId: string;
+  normEnglish: string;
+  english: string;
+  category: string;
+  fileId: string;
+  url: string;
+  status: 'ready' | 'missing' | 'failed';
+  source?: string;
+  sourceUrl?: string;
+  license?: string;
+  updatedAt: string;
+}
+
+export interface CloudImageIndex {
+  version: number;
+  service?: string;
+  updatedAt: string;
+  images: Record<string, CloudImageEntry>;
+}
+
+export interface SaveCloudImageParams {
+  english: string;
+  category?: string;
+  sourceUrl: string;
+  vocabId?: string;
+}
+
+/**
+ * Retrieves the shared Google Drive vocabulary image index across all users.
+ */
+export async function fetchCloudImageIndex(url = getGatewayUrl()): Promise<{ ok: boolean; index?: CloudImageIndex; error?: string }> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'get_image_index' }),
+      redirect: 'follow',
+      mode: 'cors',
+      signal: createTimeoutSignal(15000)
+    });
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    const data = await response.json();
+    if (data.status === 'success' && data.index) {
+      return { ok: true, index: data.index };
+    }
+    return { ok: false, error: data.message || 'Unable to retrieve image index' };
+  } catch (err: any) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+/**
+ * Persists a validated vocabulary image to the shared Google Drive image folder and updates the shared index.
+ */
+export async function saveCloudVocabularyImage(
+  params: SaveCloudImageParams,
+  url = getGatewayUrl()
+): Promise<{ ok: boolean; entry?: CloudImageEntry; duplicate?: boolean; error?: string }> {
+  try {
+    // Only licensed Wikimedia source URLs are sent; the backend rejects direct uploads
+    // and determines MIME type, source and licence itself.
+    const payload = {
+      action: 'save_vocabulary_image',
+      english: params.english,
+      category: params.category || 'Other',
+      vocabId: params.vocabId,
+      sourceUrl: params.sourceUrl
+    };
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      mode: 'cors',
+      signal: createTimeoutSignal(25000)
+    });
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    const data = await response.json();
+    if (data.status === 'success' && data.entry) {
+      return { ok: true, entry: data.entry, duplicate: Boolean(data.duplicate) };
+    }
+    return { ok: false, error: data.message || 'Failed to save vocabulary image to cloud' };
+  } catch (err: any) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+/**
+ * Streams binary image dataUrl from Google Drive for private or offline caching.
+ */
+export async function streamCloudImage(
+  fileId: string,
+  url = getGatewayUrl()
+): Promise<{ ok: boolean; imageDataUrl?: string; error?: string }> {
+  try {
+    const cleanId = String(fileId || '').trim();
+    if (!cleanId) return { ok: false, error: 'Missing image file ID' };
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'stream_image', fileId: cleanId }),
+      redirect: 'follow',
+      mode: 'cors',
+      signal: createTimeoutSignal(20000)
+    });
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    const data = await response.json();
+    if (data.status === 'success' && data.imageDataUrl) {
+      return { ok: true, imageDataUrl: data.imageDataUrl };
+    }
+    return { ok: false, error: data.message || 'Could not stream image' };
+  } catch (err: any) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}

@@ -19,6 +19,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       {/* Unified Studio Header */}
       <StudioHeader
         theme="default"
+        title="Edo"
+        sectionLabel="Community Teachers"
         rightAction="settings"
         onRightAction={onOpenSystemInfo}
         onLogoClick={() => onNavigate('welcome')}

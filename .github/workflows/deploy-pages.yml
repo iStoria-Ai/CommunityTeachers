@@ -34,7 +34,7 @@ jobs:
       - name: Run storage and sync regression tests
         run: npm test
 
-      - name: Build Vite application for GitHub Pages (/Edo-Language-Studio/)
+      - name: Build Vite application for GitHub Pages (https://edo.communityteachers.info)
         run: |
           npm run build
           cp dist/index.html dist/404.html

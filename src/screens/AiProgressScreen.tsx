@@ -20,7 +20,7 @@ interface AiProgressScreenProps {
 }
 
 export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
-  stats: localStats,
+  stats: _localStats,
   onBackToDashboard
 }) => {
   const [cloud, setCloud] = useState<DriveCollectionStats | null>(null);
@@ -133,7 +133,6 @@ export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
             </div>
             {error ? <p role="alert" className="text-red-700">Drive totals unavailable: {error} The app retries automatically.</p> : <p role="status">{cloud ? `${cloud.fileCount} files · ${cloud.audioFileCount} audio files · ${cloud.metadataFileCount} recording metadata files` : 'Reading the studio folder…'}</p>}
             {cloud && <p className="text-[#5A665D]">Updated {new Date(checkedAt).toLocaleTimeString()}. Refreshes every 30 seconds. Deleted files leave these totals.</p>}
-            <p className="text-[#5A665D]">This device holds {localStats.totalContributions} local contributions. Local backups are separate from Drive totals. Test files and incomplete recording pairs do not count as learning contributions.</p>
           </div>
 
           {/* 2 x 2 Stats Grid */}

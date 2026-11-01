@@ -250,7 +250,7 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
 
         {audioDataUrl && (
           <p className="text-[11.5px] text-[#556058] text-center leading-relaxed mt-2.5 px-2">
-            By submitting your recording, you agree to share it for listening in the Edo Language Studio Library. Your voice will not be used for AI training.
+            By submitting your recording, you agree to share it for listening in the Community Library. Your voice will not be used for AI training.
           </p>
         )}
         {/* Bottom Microphone + Send Layout */}

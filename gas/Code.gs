@@ -120,7 +120,7 @@ function getVerifiedContributor(providedToken, action, payload) {
   }
 
   // If token is invalid or omitted, check if action permits community contributor access
-  const communityAllowedActions = ['upload_recording', 'ping', 'stream_audio', 'get_needs_spelling', 'submit_spelling', 'get_collection_stats', 'get_library', 'get_question_state', 'upsert_text_contribution', 'update_recording_permissions', 'record_playback', 'update_contribution'];
+  const communityAllowedActions = ['upload_recording', 'ping', 'stream_audio', 'get_needs_spelling', 'submit_spelling', 'get_collection_stats', 'get_library', 'get_question_state', 'upsert_text_contribution', 'update_recording_permissions', 'record_playback', 'update_contribution', 'get_image_index', 'save_vocabulary_image', 'stream_image'];
   if (communityAllowedActions.indexOf(action) !== -1) {
     // Enforce rate limiting for community uploads via CacheService
     if (['upload_recording', 'submit_spelling', 'upsert_text_contribution', 'update_contribution'].indexOf(action) !== -1) {
@@ -135,6 +135,18 @@ function getVerifiedContributor(providedToken, action, payload) {
       }
 
       // Increment count in cache
+      cache.put(cacheKey, String(currentCount + 1), RATE_LIMIT_WINDOW_SEC);
+    } else if (action === 'save_vocabulary_image') {
+      const cache = CacheService.getScriptCache();
+      const currentWindow = Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000));
+      const cacheKey = 'rate_community_images_' + currentWindow;
+      const currentCount = parseInt(cache.get(cacheKey) || '0', 10);
+
+      if (currentCount >= MAX_COMMUNITY_UPLOADS_PER_WINDOW) {
+        Logger.log('RATE LIMIT EXCEEDED: Community image save limit reached for current window.');
+        return { isRateLimited: true };
+      }
+
       cache.put(cacheKey, String(currentCount + 1), RATE_LIMIT_WINDOW_SEC);
     }
 
@@ -270,6 +282,89 @@ function sharedLibraryItems(folder) {
   return items;
 }
 
+const IMAGES_FOLDER_NAME = 'Edo Language Studio Images';
+const IMAGE_INDEX_FILE_NAME = 'edo_image_index.json';
+
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB per vocabulary image
+const IMAGE_WORD_COOLDOWN_SEC = 3600; // One save attempt per word per hour
+const ALLOWED_IMAGE_HOSTS = ['upload.wikimedia.org'];
+const ALLOWED_IMAGE_MIME_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+function emptyImageIndex_() {
+  return { version: 1, service: 'Edo Language Studio Image Index', updatedAt: new Date().toISOString(), images: {} };
+}
+
+/** Read-only lookup: returns the Images subfolder or null. Never creates anything. */
+function findImagesFolder_(parentFolder) {
+  const folders = parentFolder.getFoldersByName(IMAGES_FOLDER_NAME);
+  return folders.hasNext() ? folders.next() : null;
+}
+
+/** Write path only: must be called while holding the script lock. */
+function getOrCreateImagesFolder_(parentFolder) {
+  return findImagesFolder_(parentFolder) || parentFolder.createFolder(IMAGES_FOLDER_NAME);
+}
+
+/** Read-only lookup: returns the index file inside the Images subfolder or null. */
+function findImageIndexFile_(imagesFolder) {
+  if (!imagesFolder) return null;
+  const files = imagesFolder.getFilesByName(IMAGE_INDEX_FILE_NAME);
+  return files.hasNext() ? files.next() : null;
+}
+
+function parseImageIndex_(indexFile) {
+  if (!indexFile) return emptyImageIndex_();
+  try {
+    const parsed = JSON.parse(indexFile.getBlob().getDataAsString() || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyImageIndex_();
+    if (!parsed.images || typeof parsed.images !== 'object' || Array.isArray(parsed.images)) parsed.images = {};
+    return parsed;
+  } catch (_) {
+    return emptyImageIndex_();
+  }
+}
+
+/**
+ * Image-only security check: the file must sit directly inside the
+ * 'Edo Language Studio Images' subfolder of TARGET_FOLDER_ID and be an image.
+ * Recordings and metadata (which live directly in TARGET_FOLDER_ID) never pass.
+ */
+function isFileInImagesFolder_(file) {
+  if (!file || file.isTrashed()) return false;
+  const mime = String(file.getMimeType() || '');
+  if (!ALLOWED_IMAGE_MIME_TYPES[mime]) return false;
+  const name = String(file.getName() || '');
+  if (name === IMAGE_INDEX_FILE_NAME || /_meta\.json$/i.test(name)) return false;
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    const parent = parents.next();
+    if (parent.getId() === TARGET_FOLDER_ID) return false;
+    if (parent.getName() !== IMAGES_FOLDER_NAME) continue;
+    const grandParents = parent.getParents();
+    while (grandParents.hasNext()) {
+      if (grandParents.next().getId() === TARGET_FOLDER_ID) return true;
+    }
+  }
+  return false;
+}
+
+/** Validates a source URL against the allow-list (HTTPS + Wikimedia upload host only). */
+function isAllowedImageSourceUrl_(url) {
+  const match = /^https:\/\/([^\/?#:@]+)(\/[^\s]*)$/i.exec(String(url || '').trim());
+  if (!match) return false;
+  return ALLOWED_IMAGE_HOSTS.indexOf(match[1].toLowerCase()) !== -1;
+}
+
+/** Detects real image content from magic bytes; returns the MIME type or ''. */
+function detectImageMime_(bytes) {
+  if (!bytes || bytes.length < 12) return '';
+  const b = function(i) { return (bytes[i] + 256) % 256; };
+  if (b(0) === 0xFF && b(1) === 0xD8 && b(2) === 0xFF) return 'image/jpeg';
+  if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4E && b(3) === 0x47) return 'image/png';
+  if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) return 'image/webp';
+  return '';
+}
+
 /**
  * Strict Security Check: Verifies that a file belongs directly to the target studio folder.
  */
@@ -311,7 +406,7 @@ function doGet(e) {
 function doPost(e) {
   const lock = LockService.getScriptLock();
   let readOnly = false;
-  try { readOnly = ['ping', 'get_library', 'get_question_state', 'get_collection_stats', 'get_needs_spelling', 'stream_audio'].indexOf(JSON.parse(e.postData.contents).action) !== -1; } catch (_) {}
+  try { readOnly = ['ping', 'get_library', 'get_question_state', 'get_collection_stats', 'get_needs_spelling', 'stream_audio', 'get_image_index', 'stream_image'].indexOf(JSON.parse(e.postData.contents).action) !== -1; } catch (_) {}
   try {
     if (!readOnly) lock.waitLock(10000); // Writes stay serialized; folder reads do not block uploads.
   } catch (lockErr) {
@@ -1005,6 +1100,176 @@ function doPost(e) {
         fileId: fileId,
         mimeType: mimeType,
         audioDataUrl: dataUrl
+      });
+    }
+
+    // ACTION D2: Retrieve Shared Image Index (strictly read-only: never creates folders or files)
+    if (action === 'get_image_index') {
+      try {
+        const indexData = parseImageIndex_(findImageIndexFile_(findImagesFolder_(folder)));
+        return createJsonResponse({
+          status: 'success',
+          action: 'get_image_index',
+          index: indexData
+        });
+      } catch (err) {
+        return createJsonResponse({
+          status: 'error',
+          code: 'IMAGE_INDEX_ERROR',
+          message: 'Unable to retrieve image index.'
+        });
+      }
+    }
+
+    // ACTION D3: Save Vocabulary Image to Google Drive & Index
+    // Runs under the script write lock. Only licensed Wikimedia images are accepted;
+    // existing files are never overwritten or replaced.
+    if (action === 'save_vocabulary_image') {
+      const english = String(payload.english || '').trim().slice(0, 80);
+      const normEnglish = normalizedEnglish(english);
+      if (!normEnglish) {
+        return createJsonResponse({ status: 'error', code: 'INVALID_ENGLISH', message: 'English word is required.' });
+      }
+      if (payload.imageBase64) {
+        return createJsonResponse({ status: 'error', code: 'UPLOAD_NOT_ALLOWED', message: 'Direct image uploads are not accepted. Only licensed Wikimedia images can be saved.' });
+      }
+      const sourceUrl = String(payload.sourceUrl || '').trim();
+      if (!isAllowedImageSourceUrl_(sourceUrl)) {
+        return createJsonResponse({ status: 'error', code: 'SOURCE_NOT_ALLOWED', message: 'Image source must be an https://upload.wikimedia.org address.' });
+      }
+
+      // Existing valid entry: return it untouched (idempotent, no duplicates, no replacement)
+      const existingFolder = findImagesFolder_(folder);
+      const existingIndex = parseImageIndex_(findImageIndexFile_(existingFolder));
+      const existingEntry = existingIndex.images[normEnglish];
+      if (existingEntry && existingEntry.status === 'ready' && existingEntry.fileId) {
+        try {
+          const checkFile = DriveApp.getFileById(existingEntry.fileId);
+          if (isFileInImagesFolder_(checkFile) && checkFile.getSize() > 0) {
+            return createJsonResponse({
+              status: 'success',
+              action: 'save_vocabulary_image',
+              duplicate: true,
+              entry: existingEntry,
+              message: 'Image already registered in shared index.'
+            });
+          }
+        } catch (_) {
+          // Indexed file is inaccessible; a new file may be saved below (the old one is not touched).
+        }
+      }
+
+      // Per-word cooldown: one save attempt per word per hour
+      const imageCache = CacheService.getScriptCache();
+      const wordKey = 'img_word_' + hashSha256(normEnglish).slice(0, 32);
+      if (imageCache.get(wordKey)) {
+        return createJsonResponse({ status: 'error', code: 'RATE_LIMIT_EXCEEDED', message: 'This word was attempted recently. Please try again later.' });
+      }
+      imageCache.put(wordKey, '1', IMAGE_WORD_COOLDOWN_SEC);
+
+      let bytes;
+      try {
+        const fetchResp = UrlFetchApp.fetch(sourceUrl, {
+          muteHttpExceptions: true,
+          followRedirects: false,
+          validateHttpsCertificates: true
+        });
+        const code = fetchResp.getResponseCode();
+        if (code < 200 || code >= 300) {
+          return createJsonResponse({ status: 'error', code: 'DOWNLOAD_FAILED', message: 'Unable to fetch image: HTTP ' + code });
+        }
+        bytes = fetchResp.getContent();
+      } catch (fetchErr) {
+        return createJsonResponse({ status: 'error', code: 'FETCH_ERROR', message: 'Failed to download image.' });
+      }
+
+      if (!bytes || bytes.length < 16) {
+        return createJsonResponse({ status: 'error', code: 'EMPTY_IMAGE', message: 'Image content is invalid or empty.' });
+      }
+      if (bytes.length > MAX_IMAGE_BYTES) {
+        return createJsonResponse({ status: 'error', code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 2 MB limit.' });
+      }
+      const detectedMime = detectImageMime_(bytes);
+      if (!detectedMime) {
+        return createJsonResponse({ status: 'error', code: 'NOT_AN_IMAGE', message: 'Downloaded content is not a JPEG, PNG or WebP image.' });
+      }
+
+      const imgFolder = getOrCreateImagesFolder_(folder);
+      const baseName = 'image_' + normEnglish.replace(/\s+/g, '_');
+      const ext = ALLOWED_IMAGE_MIME_TYPES[detectedMime];
+      let fileName = baseName + '.' + ext;
+      if (imgFolder.getFilesByName(fileName).hasNext()) {
+        // Never overwrite an existing file: save alongside it with a unique name.
+        fileName = baseName + '_' + Date.now() + '.' + ext;
+      }
+      const savedFile = imgFolder.createFile(Utilities.newBlob(bytes, detectedMime, fileName));
+      try {
+        savedFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (_) {}
+
+      const entry = {
+        vocabId: String(payload.vocabId || ('vocab-' + normEnglish)).slice(0, 80),
+        normEnglish: normEnglish,
+        english: english,
+        category: String(payload.category || 'Other').slice(0, 40),
+        fileId: savedFile.getId(),
+        url: 'https://drive.google.com/thumbnail?id=' + savedFile.getId() + '&sz=w500',
+        status: 'ready',
+        source: 'wikimedia',
+        sourceUrl: sourceUrl,
+        license: 'Wikimedia Commons (see source page for licence)',
+        updatedAt: new Date().toISOString()
+      };
+
+      // Re-read the index inside the lock and only add this word (other entries untouched)
+      let indexFile = findImageIndexFile_(imgFolder);
+      const indexData = parseImageIndex_(indexFile);
+      indexData.images[normEnglish] = entry;
+      indexData.updatedAt = new Date().toISOString();
+      const indexJson = JSON.stringify(indexData, null, 2);
+      if (indexFile) {
+        indexFile.setContent(indexJson);
+      } else {
+        indexFile = imgFolder.createFile(Utilities.newBlob(indexJson, 'application/json', IMAGE_INDEX_FILE_NAME));
+      }
+
+      return createJsonResponse({
+        status: 'success',
+        action: 'save_vocabulary_image',
+        duplicate: false,
+        entry: entry,
+        message: 'Vocabulary image saved to Google Drive and registered in shared index.'
+      });
+    }
+
+    // ACTION D4: Image Streaming — restricted to image files inside the Images subfolder.
+    // Recordings and metadata can never be returned by this action.
+    if (action === 'stream_image') {
+      const fileId = String(payload.fileId || '').trim();
+      if (!fileId) {
+        return createJsonResponse({ status: 'error', code: 'MISSING_FILE_ID', message: 'Missing image file ID.' });
+      }
+
+      let imageFile;
+      try {
+        imageFile = DriveApp.getFileById(fileId);
+      } catch (err) {
+        return createJsonResponse({ status: 'error', code: 'NOT_FOUND', message: 'Image file not found.' });
+      }
+
+      if (!isFileInImagesFolder_(imageFile)) {
+        return createJsonResponse({ status: 'error', code: 'ACCESS_DENIED', message: 'Access denied: Not a vocabulary image.' });
+      }
+
+      const mimeType = imageFile.getMimeType();
+      const base64Data = Utilities.base64Encode(imageFile.getBlob().getBytes());
+
+      return createJsonResponse({
+        status: 'success',
+        action: 'stream_image',
+        fileId: fileId,
+        mimeType: mimeType,
+        imageDataUrl: 'data:' + mimeType + ';base64,' + base64Data
       });
     }
 

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 const bundle = buildSync({
-  stdin: { contents: `export * from './src/services/childrenLibraryService'; export { LanguageLibraryScreen } from './src/screens/LanguageLibraryScreen'; export { HelpOthersScreen } from './src/screens/HelpOthersScreen'; export { clearSessionAudioCache } from './src/services/audioService';`, resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: `export * from './src/services/childrenLibraryService'; export { LanguageLibraryScreen, isLessonNew, getLessonDriveTimestamp } from './src/screens/LanguageLibraryScreen'; export { HelpOthersScreen } from './src/screens/HelpOthersScreen'; export { clearSessionAudioCache } from './src/services/audioService';`, resolveDir: process.cwd(), loader: 'ts' },
   bundle: true, write: false, platform: 'node', format: 'cjs',
   define: { 'import.meta.env.BASE_URL': '"/Edo-Language-Studio/"' },
   external: ['react', 'react/jsx-runtime', '@capacitor/*']
@@ -341,4 +341,71 @@ const lifecycleBundle = buildSync({
   assert(playBtn, 'Help Others displays Play button for existing audio');
 
   console.log('PASS: whole-card and speaker activation once; keyboard Enter/Space; immediate stop/switch; stale cloud replies ignored; denied audio blocked; adult card unchanged; card pending and retry states verified; help others play button verified.');
+
+  // Test New <-> All Community Library toggle and 5-day expiration logic
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const recentEntry = {
+    ...lesson,
+    id: 'cloud-recent',
+    english: 'Recent Word',
+    createdAt: new Date(now - 2 * dayMs).toISOString()
+  };
+  const newestEntry = {
+    ...lesson,
+    id: 'cloud-newest',
+    english: 'Newest Word',
+    createdAt: new Date(now - 1 * dayMs).toISOString()
+  };
+  const oldEntry = {
+    ...lesson,
+    id: 'cloud-old',
+    english: 'Old Word',
+    createdAt: new Date(now - 6 * dayMs).toISOString()
+  };
+
+  // 1. isLessonNew evaluates accurately based on Google Drive timestamps
+  assert.equal(api.isLessonNew(recentEntry, now), true, 'Lesson from 2 days ago is New');
+  assert.equal(api.isLessonNew(newestEntry, now), true, 'Lesson from 1 day ago is New');
+  assert.equal(api.isLessonNew(oldEntry, now), false, 'Lesson from 6 days ago (> 5 days) is NOT New');
+
+  // 2. Default render in Community Library (readOnly: true) shows New tab selected by default
+  const libEntries = [oldEntry, recentEntry, newestEntry];
+  const renderedChild = renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, {
+    entries: libEntries,
+    readOnly: true,
+    onBackToDashboard() {}
+  }));
+
+  // Toggle button in first position renders "New"
+  assert.match(renderedChild, />New<\/button>/, 'First button displays New');
+  // Newest lessons appear first in New view
+  const recentIdx = renderedChild.indexOf('Recent Word');
+  const newestIdx = renderedChild.indexOf('Newest Word');
+  assert.ok(newestIdx !== -1 && recentIdx !== -1, 'Both recent entries appear');
+  assert.ok(newestIdx < recentIdx, 'Newest entry appears before recent entry');
+  // Old entry (> 5 days) does not appear in New view
+  assert.doesNotMatch(renderedChild, /Old Word/, 'Old entry is hidden in New view');
+
+  // 3. Community Teachers (readOnly: false) renders standard All button
+  const renderedAdult = renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, {
+    entries: libEntries,
+    readOnly: false,
+    onBackToDashboard() {}
+  }));
+  assert.match(renderedAdult, />All<\/button>/, 'Adult studio displays All button');
+  assert.match(renderedAdult, /Old Word/, 'Adult studio displays all entries');
+
+  // 4. Empty state message when there are no new lessons
+  const onlyOldEntries = [oldEntry];
+  const renderedEmpty = renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, {
+    entries: onlyOldEntries,
+    readOnly: true,
+    onBackToDashboard() {}
+  }));
+  assert.match(renderedEmpty, /No new lessons this week/, 'Shows friendly empty title');
+  assert.match(renderedEmpty, /There are no new lessons this week\. Tap <strong>All<\/strong> to see everything\./, 'Shows friendly guidance');
+  assert.match(renderedEmpty, /View All Lessons/, 'Provides direct button to view all');
+
+  console.log('PASS: Community Library New <-> All toggle, 5-day expiration, newest-first sorting, and friendly empty state verified.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -942,7 +942,7 @@ export const App: React.FC = () => {
                   className="w-8 h-8 rounded-full object-cover"
                 />
                 <h2 className="text-[19px] font-bold">
-                  Edo Language Studio — Info
+                  Community Teachers — Info
                 </h2>
               </div>
               <button
@@ -961,7 +961,7 @@ export const App: React.FC = () => {
                   <span>Community Language Preservation Prototype</span>
                 </h3>
                 <p className="text-[#3C473F] text-[12.5px]">
-                  Edo Language Studio helps speakers record and write Edo words and phrases. Recordings and text are currently stored locally on your device.
+                  Community Teachers helps speakers record and write Edo words and phrases. Recordings and text are stored locally on your device.
                 </p>
               </div>
 

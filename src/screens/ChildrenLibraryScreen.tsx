@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { LanguageLibraryScreen } from './LanguageLibraryScreen';
 import { fetchChildrenLibrary, streamChildrenAudio } from '../services/childrenLibraryService';
-import { startBackgroundAudioLoading } from '../services/audioPreloader';
+import { startBackgroundAudioLoading, clearAudioPreloadState } from '../services/audioPreloader';
+import { clearSessionAudioCache } from '../services/audioService';
+import { setImageServiceReadOnly } from '../services/imageService';
 import { EdoEntry } from '../types/edo';
 import { PhoneFrame } from '../components/PhoneFrame';
+
+// The Children's Library is strictly read-only: no image discovery, retries or Google Drive saves.
+// Set before the first render; only the Children's Library entry point imports this module.
+setImageServiceReadOnly(true);
 
 export const ChildrenLibraryScreen: React.FC = () => {
   const [entries, setEntries] = useState<EdoEntry[]>([]);
@@ -54,6 +60,8 @@ export const ChildrenLibraryScreen: React.FC = () => {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', refresh);
+      clearAudioPreloadState();
+      clearSessionAudioCache();
     };
   }, []);
 
