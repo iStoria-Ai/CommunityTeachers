@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-  let defaultBase = '/Edo-Language-Studio/';
+  let defaultBase = '/';
   if (mode === 'capacitor') {
     defaultBase = './';
   } else if (mode === 'getrodion') {
