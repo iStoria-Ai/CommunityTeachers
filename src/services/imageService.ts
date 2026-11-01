@@ -551,14 +551,31 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
     }
   } catch (_) {}
 
-  // Context-aware search term for ambiguous words
+  // Context-aware search term for ambiguous words: Human Body words must always be qualified with "Human"
   let searchTerm = englishWord.trim();
-  if (category && category !== 'Other' && category !== 'Words' && category !== 'Phrases') {
-    if (norm === 'head' && category === 'Body') searchTerm = 'Human head';
-    else if (norm === 'cup') searchTerm = 'Coffee cup';
+  const isBodyWord = category === 'Body' || [
+    'head', 'nose', 'hand', 'ear', 'mouth', 'foot', 'leg', 'arm', 'heart', 'body',
+    'face', 'tooth', 'teeth', 'hair', 'neck', 'belly', 'chest', 'knee', 'bone', 'skin',
+    'blood', 'stomach', 'back', 'finger', 'toe', 'tongue', 'shoulder'
+  ].includes(norm);
+
+  if (isBodyWord) {
+    searchTerm = 'Human ' + englishWord.trim();
+  } else if (category && category !== 'Other' && category !== 'Words' && category !== 'Phrases') {
+    if (norm === 'cup') searchTerm = 'Coffee cup';
     else if (norm === 'god') searchTerm = 'Sunrise sunlight';
     else if (norm === 'nursing mother') searchTerm = 'Breastfeeding infant';
   }
+
+  // Animal disqualifier list to prevent animal pictures (e.g. chimpanzee teeth, elephant skin) from appearing in Human Body
+  const isAnimalMedia = (urlOrTitle: string): boolean => {
+    const lower = urlOrTitle.toLowerCase();
+    return [
+      'chimpanzee', 'chimp', 'monkey', 'kangaroo', 'elephant', 'ape', 'gorilla',
+      'primate', 'macaca', 'pan_troglodytes', 'canis', 'felis', 'horse', 'cow',
+      'pig', 'lion', 'tiger', 'bear', 'wolf', 'shark', 'animal'
+    ].some(animal => lower.includes(animal));
+  };
 
   // Fetch from Wikimedia Commons PageImages API (properly licensed CC0 / CC-BY, CORS enabled)
   try {
@@ -577,8 +594,14 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
       const pages = data?.query?.pages;
       if (pages) {
         const firstPageKey = Object.keys(pages)[0];
-        const thumbnail = pages[firstPageKey]?.thumbnail?.source;
+        const pageObj = pages[firstPageKey];
+        const thumbnail = pageObj?.thumbnail?.source;
+        const pageTitle = pageObj?.title || '';
         if (thumbnail && typeof thumbnail === 'string' && thumbnail.startsWith('http')) {
+          if (isBodyWord && (isAnimalMedia(thumbnail) || isAnimalMedia(pageTitle))) {
+            // Strictly reject animal pictures for Human Body words
+            return null;
+          }
           void saveDiscoveredImage(norm, thumbnail, englishWord, category, id);
           return thumbnail;
         }
@@ -587,7 +610,7 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
 
     // Fallback search with generator query if exact title did not match
     const searchEndpoint = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(
-      englishWord
+      searchTerm
     )}&gsrlimit=1&prop=pageimages&pithumbsize=500&format=json&origin=*`;
 
     const searchController = new AbortController();
@@ -599,9 +622,14 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
       const sData = await searchRes.json();
       const sPages = sData?.query?.pages;
       if (sPages) {
-        const first = Object.values(sPages)[0] as { thumbnail?: { source?: string } } | undefined;
+        const first = Object.values(sPages)[0] as { title?: string; thumbnail?: { source?: string } } | undefined;
         const sThumbnail = first?.thumbnail?.source;
+        const sTitle = first?.title || '';
         if (sThumbnail && typeof sThumbnail === 'string' && sThumbnail.startsWith('http')) {
+          if (isBodyWord && (isAnimalMedia(sThumbnail) || isAnimalMedia(sTitle))) {
+            // Strictly reject animal pictures for Human Body words
+            return null;
+          }
           void saveDiscoveredImage(norm, sThumbnail, englishWord, category, id);
           return sThumbnail;
         }

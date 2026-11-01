@@ -153,10 +153,25 @@ assert.ok(getVocabularyImageUrl({ english: 'Dog' }).includes('animal-dog.jpg'), 
 assert.ok(getVocabularyImageUrl({ english: 'Birds' }).includes('animal-bird.jpg'), 'Birds must resolve to bundled asset');
 console.log('✓ Verified working images (Dog, Birds, God, Nursing Mother) return status "ready" immediately without searching.');
 
-// Test 8b: Missing images such as Pig and Teeth return 'missing'
+// Test 8a2: Human Body category must use human images (not animals)
+assert.equal(getImageStatus({ english: 'Teeth' }), 'ready', 'Human Body item "Teeth" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Tooth' }), 'ready', 'Human Body item "Tooth" must have status "ready"');
+const teethUrl = getVocabularyImageUrl({ english: 'Teeth' });
+assert.ok(teethUrl.includes('teeth.svg') || teethUrl.includes('mouth.svg'), 'Teeth must show human teeth or human mouth');
+assert.ok(!teethUrl.includes('chimpanzee') && !teethUrl.includes('monkey') && !teethUrl.includes('animal'), 'Teeth must not show animals');
+
+const bodyKeywords = ['Hand', 'Eye', 'Head', 'Ear', 'Nose', 'Mouth', 'Foot', 'Leg', 'Arm', 'Heart', 'Teeth', 'Tooth', 'Tongue', 'Bone', 'Blood'];
+for (const bw of bodyKeywords) {
+  const bUrl = getVocabularyImageUrl({ english: bw });
+  assert.ok(bUrl && !bUrl.includes('animal') && !bUrl.includes('monkey') && !bUrl.includes('chimpanzee'), `${bw} must resolve to a human image, not an animal`);
+  assert.equal(getImageStatus({ english: bw }), 'ready', `${bw} must have status ready`);
+}
+console.log('✓ Verified Human Body images (Teeth, Tongue, Hand, Eye, etc.) resolve to human images, not animals.');
+
+// Test 8b: Missing unbundled images such as Pig and Corn return 'missing'
 assert.equal(getImageStatus({ english: 'Pig' }), 'missing', 'Unbundled item "Pig" must return status "missing"');
-assert.equal(getImageStatus({ english: 'Teeth' }), 'missing', 'Unbundled item "Teeth" must return status "missing"');
-console.log('✓ Verified unbundled/missing images (Pig, Teeth) start with status "missing".');
+assert.equal(getImageStatus({ english: 'Corn' }), 'missing', 'Unbundled item "Corn" must return status "missing"');
+console.log('✓ Verified unbundled/missing images (Pig, Corn) start with status "missing".');
 
 // Test 8c: Real-time status subscription and single-item retry
 let receivedStatus = '';
@@ -172,10 +187,11 @@ assert.equal(getImageStatus({ english: 'Pig' }), 'downloading', 'In-flight retry
 assert.equal(receivedStatus, 'downloading', 'Status update listener must receive "downloading" event');
 unsubscribe();
 
-// Ensure other images like Teeth and Dog remain unaffected
-assert.equal(getImageStatus({ english: 'Teeth' }), 'missing', 'Other missing images must remain unaffected');
-assert.equal(getImageStatus({ english: 'Dog' }), 'ready', 'Existing images must remain unaffected');
-console.log('✓ Verified single-item retry: retrying "Pig" does not affect "Teeth" or "Dog".');
+// Ensure other images like Corn, Teeth and Dog remain unaffected
+assert.equal(getImageStatus({ english: 'Corn' }), 'missing', 'Other missing images like Corn must remain unaffected');
+assert.equal(getImageStatus({ english: 'Teeth' }), 'ready', 'Human Body Teeth must remain ready and unaffected');
+assert.equal(getImageStatus({ english: 'Dog' }), 'ready', 'Existing images like Dog must remain unaffected');
+console.log('✓ Verified single-item retry: retrying "Pig" does not affect "Corn", "Teeth" or "Dog".');
 
 console.log(`✓ All ${verifiedCount} starter asset files are present. File size does not verify the pictured subject.`);
 console.log('=== BUNDLED VOCABULARY ASSET & SMART IMAGE DETECTION TESTS PASSED ===\n');
