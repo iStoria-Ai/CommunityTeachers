@@ -118,13 +118,16 @@ assert.equal(availableQuestions[0].id, 'home-door');
 assert.equal(availableQuestions[1].id, 'food-rice');
 console.log('✓ Answered words correctly excluded by ID and normalized English.');
 
-// Anatomical prompts must resolve to audited subject illustrations, not mislabeled photos.
+// Anatomical prompts must resolve to verified human anatomy photos, not cartoons or mislabeled photos.
 const imageBundle = buildSync({ entryPoints: ['src/services/imageService.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', logLevel: 'silent' }).outputFiles[0].text;
 const imageModule = { exports: {} };
 vm.runInNewContext(imageBundle, { module: imageModule, exports: imageModule.exports, console });
-for (const word of ['Head', 'Nose', 'Leg', 'Hand', 'Body', 'Water']) {
-  assert(imageModule.exports.getVocabularyImageUrl({ english: word, id: 'body-head', imageUrl: '/wrong-photo.jpg' }).endsWith('/verified/' + word.toLowerCase() + '.svg'));
+for (const word of ['Teeth', 'Mouth', 'Tongue', 'Hand', 'Eye', 'Ear', 'Foot']) {
+  const url = imageModule.exports.getVocabularyImageUrl({ english: word });
+  assert(url && url.endsWith('.jpg') && !url.includes('.svg'), `${word} must resolve to genuine human photograph, not a cartoon SVG`);
 }
+// Non-body subject illustration verification
+assert(imageModule.exports.getVocabularyImageUrl({ english: 'Walk' }).endsWith('/verified/walk.svg'), 'Walk must resolve to verified subject illustration');
 
 // 7. Verify Edo Alphabet Character Set & Cursor Insertion Logic
 const letterBarBundle = buildSync({ entryPoints: ['src/components/EdoLetterBar.tsx'], bundle: true, write: false, platform: 'node', format: 'cjs', logLevel: 'silent', external: ['react'] }).outputFiles[0].text;

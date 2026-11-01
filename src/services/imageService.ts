@@ -47,6 +47,18 @@ const CURATED_IMAGE_FILENAMES: Record<string, string> = {
   'arm': 'body-arm.jpg',
   'arms': 'body-arm.jpg',
   'heart': 'body-heart.jpg',
+  'teeth': 'body-teeth.jpg',
+  'tooth': 'body-teeth.jpg',
+  'tongue': 'body-tongue.jpg',
+  'knee': 'body-knee.jpg',
+  'knees': 'body-knee.jpg',
+  'finger': 'body-finger.jpg',
+  'fingers': 'body-finger.jpg',
+  'toe': 'body-toe.jpg',
+  'toes': 'body-toe.jpg',
+  'bone': 'body-bone.jpg',
+  'bones': 'body-bone.jpg',
+  'blood': 'body-blood.jpg',
 
   // Movement
   'go': 'move-go.jpg',
@@ -297,13 +309,8 @@ type ImageParams = {
  * discovery) always win over a placeholder card, which is kept only as a display fallback.
  */
 function resolveImage(params: ImageParams): { url: string; isPlaceholder: boolean } {
-  const verifiedSubject = normalizeEnglish(params.english || '');
-  const subjectAsset = (verifiedSubjects as Record<string, string>)[verifiedSubject];
-  if (subjectAsset) {
-    const base = getBaseUrl();
-    return { url: `${base.endsWith('/') ? base : base + '/'}assets/vocabulary/verified/${subjectAsset}.svg`, isPlaceholder: false };
-  }
-  if (verifiedSubject === 'yam') return { url: '', isPlaceholder: false };
+  const norm = normalizeEnglish(params.english || '');
+  if (norm === 'yam') return { url: '', isPlaceholder: false };
 
   // 1. Explicit image URL already provided
   if (params.imageUrl && params.imageUrl.trim()) {
@@ -325,13 +332,28 @@ function resolveImage(params: ImageParams): { url: string; isPlaceholder: boolea
     return url;
   };
 
-  // 2. Exact match by ID in curated set
-  if (params.id) {
-    const filenameById = `${params.id}.jpg`;
-    if (Object.values(CURATED_IMAGE_FILENAMES).includes(filenameById)) {
-      const real = bundled(filenameById);
+  // Priority 1: For Human Body lessons, verified human anatomy images have absolute priority
+  // over generic illustrations, cartoon drawings, and online search results.
+  const isBodySubject = [
+    'hand', 'hands', 'eye', 'eyes', 'head', 'ear', 'ears', 'nose', 'mouth',
+    'foot', 'feet', 'leg', 'legs', 'arm', 'arms', 'heart', 'teeth', 'tooth',
+    'tongue', 'knee', 'knees', 'finger', 'fingers', 'toe', 'toes', 'bone',
+    'bones', 'blood', 'neck', 'hair', 'shoulder', 'stomach', 'chest', 'back', 'skin'
+  ].includes(norm);
+
+  if (isBodySubject) {
+    const bodyPhoto = bundled(CURATED_IMAGE_FILENAMES[norm]);
+    if (bodyPhoto) return { url: bodyPhoto, isPlaceholder: false };
+    if (params.id) {
+      const real = bundled(`${params.id}.jpg`);
       if (real) return { url: real, isPlaceholder: false };
     }
+  }
+
+  // Priority 2: Verified subject illustration (for audited non-body vocabulary items)
+  const subjectAsset = (verifiedSubjects as Record<string, string>)[norm];
+  if (subjectAsset) {
+    return { url: `${cleanBase}assets/vocabulary/verified/${subjectAsset}.svg`, isPlaceholder: false };
   }
 
   // 3. Match by normalized English text
@@ -376,7 +398,7 @@ function resolveImage(params: ImageParams): { url: string; isPlaceholder: boolea
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 4. Match by illustrationKey
@@ -540,7 +562,7 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Check persistent storage snapshot
   try {
@@ -549,7 +571,7 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
       inMemoryCache.set(norm, stored);
       return stored;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Context-aware search term for ambiguous words: Human Body words must always be qualified with "Human"
   let searchTerm = englishWord.trim();
@@ -658,8 +680,8 @@ async function saveDiscoveredImage(
       map[norm] = url;
       localStorage.setItem(ONLINE_IMAGES_CACHE_KEY, JSON.stringify(map));
     }
-  } catch (_) {}
-  void writeLibrarySnapshot('edo_vocabulary_image_' + norm, url).catch(() => {});
+  } catch (_) { }
+  void writeLibrarySnapshot('edo_vocabulary_image_' + norm, url).catch(() => { });
 
   // Persist to shared Google Drive folder and update shared index in background
   // Only licensed Wikimedia images are sent; the backend enforces the same allow-list.
@@ -679,7 +701,7 @@ async function saveDiscoveredImage(
           notifyImageListeners(norm, cloudResp.entry.url, 'ready');
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 
@@ -725,7 +747,7 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
           // Corrupt snapshot is ignored; the cloud index below is authoritative
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 2. Authoritative shared index from Google Drive
@@ -735,10 +757,10 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
     if (res.ok && res.index && res.index.images) {
       applyIndexEntries(res.index, true);
       if (writesAllowed) {
-        void writeLibrarySnapshot('edo_image_index_v1', JSON.stringify(res.index)).catch(() => {});
+        void writeLibrarySnapshot('edo_image_index_v1', JSON.stringify(res.index)).catch(() => { });
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 /**

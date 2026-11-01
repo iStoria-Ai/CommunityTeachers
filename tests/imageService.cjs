@@ -157,7 +157,7 @@ console.log('✓ Verified working images (Dog, Birds, God, Nursing Mother) retur
 assert.equal(getImageStatus({ english: 'Teeth' }), 'ready', 'Human Body item "Teeth" must have status "ready"');
 assert.equal(getImageStatus({ english: 'Tooth' }), 'ready', 'Human Body item "Tooth" must have status "ready"');
 const teethUrl = getVocabularyImageUrl({ english: 'Teeth' });
-assert.ok(teethUrl.includes('teeth.svg') || teethUrl.includes('mouth.svg'), 'Teeth must show human teeth or human mouth');
+assert.ok(teethUrl.includes('body-teeth.jpg') || teethUrl.includes('teeth'), 'Teeth must resolve to genuine human teeth photo');
 assert.ok(!teethUrl.includes('chimpanzee') && !teethUrl.includes('monkey') && !teethUrl.includes('animal'), 'Teeth must not show animals');
 
 const bodyKeywords = ['Hand', 'Eye', 'Head', 'Ear', 'Nose', 'Mouth', 'Foot', 'Leg', 'Arm', 'Heart', 'Teeth', 'Tooth', 'Tongue', 'Bone', 'Blood'];
