@@ -1,0 +1,363 @@
+[
+  {
+    "id": "urhobo-word-hand",
+    "english": "Hand",
+    "urhobo": "Obọ",
+    "category": "Body",
+    "icon": "Hand",
+    "emoji": "🖐🏽",
+    "pronunciation": "oh-boh",
+    "notes": "Urhobo body part. Note underdot 'ọ'."
+  },
+  {
+    "id": "urhobo-word-eye",
+    "english": "Eye",
+    "urhobo": "Ẹro",
+    "category": "Body",
+    "icon": "Eye",
+    "emoji": "👁️",
+    "pronunciation": "eh-roh",
+    "notes": "Note underdot 'ẹ'."
+  },
+  {
+    "id": "urhobo-word-head",
+    "english": "Head",
+    "urhobo": "Uyovwi",
+    "category": "Body",
+    "icon": "Smile",
+    "emoji": "🗣️",
+    "pronunciation": "oo-yoh-vwee",
+    "notes": "Features Urhobo 'vw' digraph."
+  },
+  {
+    "id": "urhobo-word-ear",
+    "english": "Ear",
+    "urhobo": "Esoro",
+    "category": "Body",
+    "icon": "Volume2",
+    "emoji": "👂🏽",
+    "pronunciation": "eh-soh-roh",
+    "notes": "Urhobo hearing organ."
+  },
+  {
+    "id": "urhobo-word-nose",
+    "english": "Nose",
+    "urhobo": "Ihwun",
+    "category": "Body",
+    "icon": "Activity",
+    "emoji": "👃🏽",
+    "pronunciation": "ee-hwoon",
+    "notes": "Features Urhobo 'hw' sound."
+  },
+  {
+    "id": "urhobo-word-mouth",
+    "english": "Mouth",
+    "urhobo": "Unu",
+    "category": "Body",
+    "icon": "MessageCircle",
+    "emoji": "👄",
+    "pronunciation": "oo-noo",
+    "notes": "Mouth in Urhobo."
+  },
+  {
+    "id": "urhobo-word-teeth",
+    "english": "Teeth",
+    "urhobo": "Ekon",
+    "category": "Body",
+    "icon": "Smile",
+    "emoji": "🦷",
+    "pronunciation": "eh-kohn",
+    "notes": "Plural of teeth in Urhobo (Akon / Ekon)."
+  },
+  {
+    "id": "urhobo-word-foot",
+    "english": "Foot",
+    "urhobo": "Owọ",
+    "category": "Body",
+    "icon": "Footprints",
+    "emoji": "🦶🏽",
+    "pronunciation": "oh-woh",
+    "notes": "Note underdot 'ọ'."
+  },
+  {
+    "id": "urhobo-word-tongue",
+    "english": "Tongue",
+    "urhobo": "Ẹrẹvwe",
+    "category": "Body",
+    "icon": "Smile",
+    "emoji": "👅",
+    "pronunciation": "eh-reh-vweh",
+    "notes": "Features 'ẹ' and 'vw' digraph."
+  },
+  {
+    "id": "urhobo-word-blood",
+    "english": "Blood",
+    "urhobo": "Azẹ",
+    "category": "Body",
+    "icon": "Heart",
+    "emoji": "🩸",
+    "pronunciation": "ah-zeh",
+    "notes": "Note underdot 'ẹ'."
+  },
+  {
+    "id": "urhobo-word-water",
+    "english": "Water",
+    "urhobo": "Ame",
+    "category": "Nature",
+    "icon": "Droplet",
+    "emoji": "💧",
+    "pronunciation": "ah-meh",
+    "notes": "Everyday essential element in Urhobo."
+  },
+  {
+    "id": "urhobo-word-food",
+    "english": "Food",
+    "urhobo": "Emu",
+    "category": "Food",
+    "icon": "Utensils",
+    "emoji": "🍲",
+    "pronunciation": "eh-moo",
+    "notes": "Food or meal in Urhobo."
+  },
+  {
+    "id": "urhobo-word-house",
+    "english": "House",
+    "urhobo": "Uwevwi",
+    "category": "Home",
+    "icon": "Home",
+    "emoji": "🏠",
+    "pronunciation": "oo-weh-vwee",
+    "notes": "Features Urhobo 'vw' digraph."
+  },
+  {
+    "id": "urhobo-word-sun",
+    "english": "Sun",
+    "urhobo": "Ọre",
+    "category": "Nature",
+    "icon": "Sun",
+    "emoji": "☀️",
+    "pronunciation": "aw-reh",
+    "notes": "Sun / daylight in Urhobo."
+  },
+  {
+    "id": "urhobo-word-moon",
+    "english": "Moon",
+    "urhobo": "Emerha",
+    "category": "Nature",
+    "icon": "Moon",
+    "emoji": "🌙",
+    "pronunciation": "eh-meh-rah",
+    "notes": "Features Urhobo 'rh' trill."
+  },
+  {
+    "id": "urhobo-word-tree",
+    "english": "Tree",
+    "urhobo": "Urhẹ",
+    "category": "Nature",
+    "icon": "Trees",
+    "emoji": "🌳",
+    "pronunciation": "oorh-eh",
+    "notes": "Features 'rh' digraph and underdot 'ẹ'."
+  },
+  {
+    "id": "urhobo-word-fire",
+    "english": "Fire",
+    "urhobo": "Erharhe",
+    "category": "Nature",
+    "icon": "Flame",
+    "emoji": "🔥",
+    "pronunciation": "ehr-hah-reh",
+    "notes": "Features Urhobo 'rh' trill."
+  },
+  {
+    "id": "urhobo-word-child",
+    "english": "Child",
+    "urhobo": "Ọmọ",
+    "category": "Family",
+    "icon": "Smile",
+    "emoji": "🧒🏾",
+    "pronunciation": "aw-maw",
+    "notes": "Features both underdot 'ọ' vowels."
+  },
+  {
+    "id": "urhobo-word-mother",
+    "english": "Mother",
+    "urhobo": "Oni",
+    "category": "Family",
+    "icon": "Users",
+    "emoji": "👩🏽",
+    "pronunciation": "oh-nee",
+    "notes": "Mother in Urhobo."
+  },
+  {
+    "id": "urhobo-word-father",
+    "english": "Father",
+    "urhobo": "Ọsẹ",
+    "category": "Family",
+    "icon": "Users",
+    "emoji": "👨🏽",
+    "pronunciation": "aw-seh",
+    "notes": "Features 'ọ' and 'ẹ' vowels."
+  },
+  {
+    "id": "urhobo-word-person",
+    "english": "Person",
+    "urhobo": "Ohwo",
+    "category": "Family",
+    "icon": "User",
+    "emoji": "👤",
+    "pronunciation": "oh-hwoh",
+    "notes": "Features Urhobo 'hw' sound."
+  },
+  {
+    "id": "urhobo-word-friend",
+    "english": "Friend",
+    "urhobo": "Ugbeyan",
+    "category": "Family",
+    "icon": "Users",
+    "emoji": "🤝🏽",
+    "pronunciation": "oog-beh-yahn",
+    "notes": "Friend / companion."
+  },
+  {
+    "id": "urhobo-word-book",
+    "english": "Book",
+    "urhobo": "Obe",
+    "category": "Education",
+    "icon": "BookOpen",
+    "emoji": "📖",
+    "pronunciation": "oh-beh",
+    "notes": "Book or leaf in Urhobo."
+  },
+  {
+    "id": "urhobo-word-dog",
+    "english": "Dog",
+    "urhobo": "Erhako",
+    "category": "Animals",
+    "icon": "Activity",
+    "emoji": "🐕",
+    "pronunciation": "ehr-hah-koh",
+    "notes": "Features Urhobo 'rh' trill."
+  },
+  {
+    "id": "urhobo-word-cat",
+    "english": "Cat",
+    "urhobo": "Ologbo",
+    "category": "Animals",
+    "icon": "Activity",
+    "emoji": "🐈",
+    "pronunciation": "oh-log-boh",
+    "notes": "Domestic cat."
+  },
+  {
+    "id": "urhobo-word-goat",
+    "english": "Goat",
+    "urhobo": "Evwe",
+    "category": "Animals",
+    "icon": "Activity",
+    "emoji": "🐐",
+    "pronunciation": "eh-vweh",
+    "notes": "Features Urhobo 'vw' digraph."
+  },
+  {
+    "id": "urhobo-word-fish",
+    "english": "Fish",
+    "urhobo": "Erhiẹn",
+    "category": "Animals",
+    "icon": "Activity",
+    "emoji": "🐟",
+    "pronunciation": "ehr-hyehn",
+    "notes": "Features 'rh' and nasalized 'ẹn'."
+  },
+  {
+    "id": "urhobo-phrase-good-morning",
+    "english": "Good morning / Respectful Greeting",
+    "urhobo": "Mighwo",
+    "category": "Phrases",
+    "icon": "Sun",
+    "emoji": "🌅",
+    "pronunciation": "mee-gwoh",
+    "notes": "Respectful greeting to an elder (reply: 'Vrendo' or 'Koyo')."
+  },
+  {
+    "id": "urhobo-phrase-welcome",
+    "english": "Welcome",
+    "urhobo": "Ndo / Kabọ",
+    "category": "Phrases",
+    "icon": "Users",
+    "emoji": "🤝🏽",
+    "pronunciation": "en-doh / kah-boh",
+    "notes": "Standard welcome in Urhobo."
+  },
+  {
+    "id": "urhobo-phrase-thank-you",
+    "english": "Thank you",
+    "urhobo": "Kobiruo",
+    "category": "Phrases",
+    "icon": "Heart",
+    "emoji": "🙏🏽",
+    "pronunciation": "koh-bee-roo-oh",
+    "notes": "'Thank you for your work/effort'."
+  },
+  {
+    "id": "urhobo-phrase-how-are-you",
+    "english": "How are you?",
+    "urhobo": "Kẹ vwo yeroma?",
+    "category": "Phrases",
+    "icon": "MessageSquare",
+    "emoji": "💬",
+    "pronunciation": "keh vwoh yeh-roh-mah",
+    "notes": "Common conversational inquiry in Urhobo."
+  },
+  {
+    "id": "urhobo-num-one",
+    "english": "One",
+    "urhobo": "Ọvo",
+    "category": "Numbers",
+    "icon": "Hash",
+    "emoji": "1️⃣",
+    "pronunciation": "aw-voh",
+    "notes": "Number 1 in Urhobo."
+  },
+  {
+    "id": "urhobo-num-two",
+    "english": "Two",
+    "urhobo": "Ivẹ",
+    "category": "Numbers",
+    "icon": "Hash",
+    "emoji": "2️⃣",
+    "pronunciation": "ee-veh",
+    "notes": "Number 2 in Urhobo."
+  },
+  {
+    "id": "urhobo-num-three",
+    "english": "Three",
+    "urhobo": "Erha",
+    "category": "Numbers",
+    "icon": "Hash",
+    "emoji": "3️⃣",
+    "pronunciation": "ehr-hah",
+    "notes": "Number 3 in Urhobo."
+  },
+  {
+    "id": "urhobo-num-four",
+    "english": "Four",
+    "urhobo": "Ẹnẹ",
+    "category": "Numbers",
+    "icon": "Hash",
+    "emoji": "4️⃣",
+    "pronunciation": "eh-neh",
+    "notes": "Number 4 in Urhobo."
+  },
+  {
+    "id": "urhobo-num-five",
+    "english": "Five",
+    "urhobo": "Iyorin",
+    "category": "Numbers",
+    "icon": "Hash",
+    "emoji": "5️⃣",
+    "pronunciation": "ee-yoh-reen",
+    "notes": "Number 5 in Urhobo."
+  }
+]
+

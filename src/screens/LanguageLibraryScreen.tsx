@@ -21,12 +21,14 @@ import { StudioHeader } from '../components/StudioHeader';
 import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
 import { QRCodeModal } from '../components/QRCodeModal';
+import { getActiveLanguage } from '../languages';
 import { playAudioRecording, stopActivePlayback, MicrophoneRecorder, invalidateSessionAudio, createPrimedAudioElement, getCachedSessionAudio } from '../services/audioService';
 import {
   getCommunityAudio,
   updateOwnedRecordingPermissions,
   readPendingCloudEdits,
   retryPendingCloudEdit,
+  getPendingEditsChangedEventName,
   CloudEditDraft
 } from '../services/communityLibrary';
 import { adminLockEntry, adminUnlockEntry, adminDeleteEntry, adminSetApprovalCode, recordPlaybackToGateway } from '../services/cloudSyncService';
@@ -183,6 +185,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   onSaveEntry,
   onBackToDashboard
 }) => {
+  const lang = getActiveLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>(readOnly ? 'new' : 'all');
   const [communityToggle, setCommunityToggle] = useState<'new' | 'all'>('new');
@@ -301,13 +304,20 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     };
     void loadEdits();
     const handleEditsChanged = () => { void loadEdits(); };
+    const eventName = getPendingEditsChangedEventName();
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('edo_pending_edits_changed', handleEditsChanged);
+      window.addEventListener(eventName, handleEditsChanged);
+      if (eventName !== 'edo_pending_edits_changed') {
+        window.addEventListener('edo_pending_edits_changed', handleEditsChanged);
+      }
     }
     return () => {
       isMounted = false;
       if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
-        window.removeEventListener('edo_pending_edits_changed', handleEditsChanged);
+        window.removeEventListener(eventName, handleEditsChanged);
+        if (eventName !== 'edo_pending_edits_changed') {
+          window.removeEventListener('edo_pending_edits_changed', handleEditsChanged);
+        }
       }
     };
   }, []);
@@ -856,7 +866,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       {/* Studio Header (Yellow Section) */}
       <StudioHeader
         theme="yellow"
-        title="Edo"
+        title={lang.name}
         sectionLabel={readOnly ? 'Community Library' : 'Language Library'}
         rightAction={readOnly ? 'qr' : 'close'}
         onRightAction={readOnly ? () => setShowQrModal(true) : onBackToDashboard}
@@ -997,7 +1007,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
               key={entry.id}
               role={readOnly ? 'button' : undefined}
               tabIndex={readOnly ? 0 : undefined}
-              aria-label={readOnly ? `${isPlayingThis ? 'Stop' : 'Play'} recorded Edo pronunciation for ${displayEnglish}` : undefined}
+              aria-label={readOnly ? `${isPlayingThis ? 'Stop' : 'Play'} recorded ${lang.name} pronunciation for ${displayEnglish}` : undefined}
               aria-pressed={readOnly ? isPlayingThis : undefined}
               onClick={(event) => {
                 if (isSaving) return;
@@ -1040,9 +1050,9 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     <span className="text-[#68766E] font-medium text-[13px]">English:</span> <span className="font-bold text-[#1A241D]">{displayEnglish}</span>
                   </p>
 
-                  {/* Line 2: Edo (Full spelling visible, with small status dot, saving spinner, or lock) */}
+                  {/* Line 2: Language name and spelling */}
                   <p className="text-[13px] sm:text-[14px] leading-snug text-[#157A4C] break-words whitespace-normal mt-1 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[#68766E] font-medium text-[13px]">Edo:</span>
+                    <span className="text-[#68766E] font-medium text-[13px]">{lang.name}:</span>
                     <span className="font-bold text-[#1F2922]">{displayEdo}</span>
                     {isSaving ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#E6EFFC] text-[#1D6CE0]">
@@ -1103,7 +1113,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     if (isSaving) return;
                     handlePlayWordAudio(e, entry);
                   }}
-                  aria-label={readOnly ? undefined : `${isPlayingThis ? 'Stop' : 'Play'} recorded Edo pronunciation for ${displayEnglish}`}
+                  aria-label={readOnly ? undefined : `${isPlayingThis ? 'Stop' : 'Play'} recorded ${lang.name} pronunciation for ${displayEnglish}`}
                   title={isSaving ? 'Saving recording to Google Drive…' : isPlaybackDenied ? 'Playback restricted (tap pencil to renew or replace voice)' : undefined}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition shrink-0 ${
                     isSaving
@@ -1256,7 +1266,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     <p className="text-[15px] font-bold text-[#1A241D]">{selectedEntry.english}</p>
                   </div>
                   <div>
-                    <span className="text-xs font-semibold text-[#68766E]">Edo Spelling</span>
+                    <span className="text-xs font-semibold text-[#68766E]">{lang.name} Spelling</span>
                     <p className="text-[15px] font-bold text-[#157A4C]">{selectedEntry.edoText}</p>
                   </div>
                 </div>
@@ -1268,7 +1278,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-xs"
                 >
                   <Volume2 className="w-4 h-4" />
-                  <span>{playingId === selectedEntry.id ? 'Stop Recorded Edo Voice' : 'Play Recorded Edo Voice'}</span>
+                  <span>{playingId === selectedEntry.id ? `Stop Recorded ${lang.name} Voice` : `Play Recorded ${lang.name} Voice`}</span>
                 </button>
 
                 {/* Administrator Unlock & Owner Options */}
@@ -1360,7 +1370,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                 {/* Field 2: Edo Translation */}
                 <div>
                   <label htmlFor="edit-edo" className="block text-xs font-bold text-[#3A453D] mb-1">
-                    Edo spelling or translation
+                    {lang.name} spelling or translation
                   </label>
                   <input
                     id="edit-edo"
@@ -1612,12 +1622,12 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
         </div>
       )}
 
-      {/* Community Library QR Code Modal */}
+      {/* Community Library QR Code Modal (resolves dynamically: https://edo.communityteachers.info/library/ for Edo) */}
       <QRCodeModal
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
         type="library"
-        targetUrl="https://edo.communityteachers.info/library/"
+        targetUrl={getActiveLanguage().libraryUrl}
       />
     </div>
   );

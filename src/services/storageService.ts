@@ -5,8 +5,201 @@ import { EdoEntry, StudioStats } from '../types/edo';
 import { canonical, digest, LocalLibrary, ProtectedRecording, protectEntries, makeBackup, parseBackup, mergeBackup, originalAudio, validatePermissions } from './libraryProtection';
 
 import { readLibrarySnapshot, writeLibrarySnapshot } from './localLibraryStore';
+import { getActiveLanguage } from '../languages';
+
+export function getStorageKey(): string {
+  return `${getActiveLanguage().storagePrefix}_language_studio_entries_v1`;
+}
+export function getLibraryStorageKey(): string {
+  return `${getActiveLanguage().storagePrefix}_language_studio_library_v2`;
+}
 
 const STORAGE_KEY = 'edo_language_studio_entries_v1';
+
+export const INITIAL_URHOBO_ENTRIES: EdoEntry[] = [
+  {
+    id: 'word-hand',
+    english: 'Hand',
+    edoText: 'Obọ',
+    category: 'word',
+    illustrationKey: 'hand',
+    emoji: '🖐🏽',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:00:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'word-eye',
+    english: 'Eye',
+    edoText: 'Ẹro',
+    category: 'word',
+    illustrationKey: 'eye',
+    emoji: '👁️',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:05:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'word-water',
+    english: 'Water',
+    edoText: 'Ame',
+    category: 'word',
+    illustrationKey: 'water',
+    emoji: '💧',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:10:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'word-food',
+    english: 'Food',
+    edoText: 'Emu',
+    category: 'word',
+    illustrationKey: 'food',
+    emoji: '🍲',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:15:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'word-house',
+    english: 'House',
+    edoText: 'Uwevwi',
+    category: 'word',
+    illustrationKey: 'house',
+    emoji: '🏠',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:20:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'phrase-good-morning',
+    english: 'Good morning',
+    edoText: undefined,
+    category: 'phrase',
+    illustrationKey: 'sun',
+    emoji: '🌅',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'unanswered',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:25:00Z',
+    notes: 'Prompt — needs Urhobo voice recording and spelling'
+  },
+  {
+    id: 'phrase-welcome',
+    english: 'Welcome / Come in',
+    edoText: 'Ndo',
+    category: 'phrase',
+    illustrationKey: 'welcome',
+    emoji: '🤝🏽',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:30:00Z',
+    notes: 'Written Urhobo prompt — needs voice pronunciation recording'
+  },
+  {
+    id: 'phrase-thank-you',
+    english: 'Thank you',
+    edoText: 'Kobiruo',
+    category: 'phrase',
+    illustrationKey: 'heart',
+    emoji: '🙏🏽',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:35:00Z',
+    notes: 'Prompt — needs voice recording'
+  },
+  {
+    id: 'word-child',
+    english: 'Child',
+    edoText: 'Ọmọ',
+    category: 'word',
+    illustrationKey: 'child',
+    emoji: '🧒🏾',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: true,
+    updatedAt: '2026-11-01T09:40:00Z',
+    notes: 'Sample prompt — needs genuine recorded Urhobo voice'
+  },
+  {
+    id: 'word-sun',
+    english: 'Sun',
+    edoText: 'Ọre',
+    category: 'word',
+    illustrationKey: 'sun',
+    emoji: '☀️',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: false,
+    updatedAt: '2026-11-01T09:45:00Z'
+  },
+  {
+    id: 'word-tree',
+    english: 'Tree',
+    edoText: 'Urhẹ',
+    category: 'word',
+    illustrationKey: 'tree',
+    emoji: '🌳',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: false,
+    updatedAt: '2026-11-01T09:50:00Z'
+  },
+  {
+    id: 'word-book',
+    english: 'Book',
+    edoText: 'Obe',
+    category: 'word',
+    illustrationKey: 'book',
+    emoji: '📖',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'needs_audio',
+    isSampleData: false,
+    updatedAt: '2026-11-01T09:55:00Z'
+  },
+  {
+    id: 'phrase-how-are-you',
+    english: 'How are you?',
+    edoText: undefined,
+    category: 'sentence',
+    illustrationKey: 'chat',
+    emoji: '💬',
+    hasAudio: false,
+    audioDurationSec: 0,
+    status: 'unanswered',
+    isSampleData: false,
+    updatedAt: '2026-11-01T10:00:00Z'
+  }
+];
+
+export function getInitialLanguageEntries(): EdoEntry[] {
+  return getActiveLanguage().id === 'urhobo' ? INITIAL_URHOBO_ENTRIES : INITIAL_EDO_ENTRIES;
+}
 
 /**
  * Initial prototype dataset.
@@ -234,7 +427,7 @@ export const LIBRARY_STORAGE_KEY = 'edo_language_studio_library_v2';
 let transactionTail: Promise<unknown> = Promise.resolve();
 async function transaction<T>(action: () => Promise<T>): Promise<T> {
   const run = async () => {
-    if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request('edo-library-v2', action);
+    if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`${getActiveLanguage().storagePrefix}-library-v2`, action);
     return action();
   };
   const result = transactionTail.then(run, run);
@@ -249,11 +442,11 @@ async function commitLibrary(library: LocalLibrary): Promise<void> {
   };
   const compact = { ...library, entries: library.entries.map(withoutAudio), recordings: library.recordings.map(recording => ({ ...recording, originalLesson: withoutAudio(recording.originalLesson) })) };
   const value = JSON.stringify({ library: compact, sha256: await digest(canonical(compact)) });
-  try { await writeLibrarySnapshot(LIBRARY_STORAGE_KEY, value); }
+  try { await writeLibrarySnapshot(getLibraryStorageKey(), value); }
   catch { throw new Error('Unable to save on this device. Storage may be full. Existing recordings and the previous library are unchanged. Export a backup before freeing space.'); }
 }
 async function readLibrary(): Promise<LocalLibrary> {
-  const value = await readLibrarySnapshot(LIBRARY_STORAGE_KEY);
+  const value = await readLibrarySnapshot(getLibraryStorageKey());
   if (value !== null) {
     const stored = JSON.parse(value);
     if (!stored.library || stored.library.version !== 2 || !Array.isArray(stored.library.entries) || !Array.isArray(stored.library.recordings) || !Array.isArray(stored.library.syncQueue) || await digest(canonical(stored.library)) !== stored.sha256) throw new Error('Saved library integrity check failed. Existing data has not been overwritten.');
@@ -262,9 +455,16 @@ async function readLibrary(): Promise<LocalLibrary> {
     return { ...library, entries: library.entries.map(hydrate), recordings: library.recordings.map(recording => ({ ...recording, originalLesson: hydrate(recording.originalLesson) })) };
   }
   let legacy: string | null = null;
-  try { legacy = (await Preferences.get({ key: STORAGE_KEY })).value; } catch { /* Original web fallback */ }
-  legacy ??= localStorage.getItem(STORAGE_KEY);
-  const parsed = legacy === null ? INITIAL_EDO_ENTRIES : JSON.parse(legacy) as EdoEntry[];
+  const legacyKey = getStorageKey();
+  try { legacy = (await Preferences.get({ key: legacyKey })).value; } catch { /* Original web fallback */ }
+  legacy ??= localStorage.getItem(legacyKey);
+  // Non-destructive fallback for legacy Edo v1 storage
+  if (legacy === null && getActiveLanguage().id === 'edo') {
+    const unprefixKey = 'language_studio_entries_v1';
+    try { legacy = (await Preferences.get({ key: unprefixKey })).value; } catch {}
+    legacy ??= localStorage.getItem(unprefixKey);
+  }
+  const parsed = legacy === null ? getInitialLanguageEntries() : JSON.parse(legacy) as EdoEntry[];
   const library = await protectEntries(parsed);
   await commitLibrary(library);
   return library;
@@ -303,7 +503,8 @@ export async function loadLibrary(): Promise<LocalLibrary> {
       cleanedQueue.length !== library.syncQueue.length;
 
     const ids = new Set(cleanedEntries.map(entry => entry.id));
-    const missing = INITIAL_EDO_ENTRIES.filter(entry => !ids.has(entry.id));
+    const initialList = getInitialLanguageEntries();
+    const missing = initialList.filter(entry => !ids.has(entry.id));
 
     if (missing.length > 0 || changed) {
       const sanitizedLib: LocalLibrary = {
@@ -375,7 +576,7 @@ export async function saveAudioFileLocally(entryId: string, audioDataUrl: string
     try {
       const { mimeType } = originalAudio(audioDataUrl);
       const extension = ({ 'audio/mp4': 'mp4', 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/mpeg': 'mp3' } as Record<string, string>)[mimeType.split(';')[0].toLowerCase()] || 'audio';
-      const fileName = `edo_voice_${crypto.randomUUID()}.${extension}`;
+      const fileName = `${getActiveLanguage().storagePrefix}_voice_${crypto.randomUUID()}.${extension}`;
       const base64Data = audioDataUrl.includes(',')
         ? audioDataUrl.split(',')[1]
         : audioDataUrl;
@@ -393,8 +594,9 @@ export async function saveAudioFileLocally(entryId: string, audioDataUrl: string
 }
 
 export async function resetToDefaultData(): Promise<EdoEntry[]> {
-  await saveEntries(INITIAL_EDO_ENTRIES);
-  return INITIAL_EDO_ENTRIES;
+  const initial = getInitialLanguageEntries();
+  await saveEntries(initial);
+  return initial;
 }
 
 export function computeStudioStats(entries: EdoEntry[], explicitNeedsHelpCount?: number): StudioStats {

@@ -1,34 +1,53 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { getActiveLanguage } from '../languages';
 
 // A separate additive store keeps the original v1 Preferences data intact.
 // IndexedDB avoids duplicating a growing audio library in web localStorage.
-const DATABASE = 'edo_language_studio_protected_library';
+function getDatabaseName(): string {
+  return `${getActiveLanguage().storagePrefix}_language_studio_protected_library`;
+}
 const STORE = 'snapshots';
 function usesIndexedDB(): boolean {
   return !Capacitor.isNativePlatform() && typeof indexedDB !== 'undefined';
 }
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE, 1);
+    const request = indexedDB.open(getDatabaseName(), 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
     request.onerror = () => reject(new Error('Unable to open protected local storage. Existing data is unchanged.'));
-    request.onblocked = () => reject(new Error('Close other Edo Studio tabs and retry opening the library.'));
+    request.onblocked = () => reject(new Error(`Close other ${getActiveLanguage().name} Studio tabs and retry opening the library.`));
     request.onsuccess = () => resolve(request.result);
   });
 }
 export async function readLibrarySnapshot(key: string): Promise<string | null> {
-  if (!usesIndexedDB()) return (await Preferences.get({ key })).value;
-  const db = await database();
-  const value = await new Promise<string | null>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const request = tx.objectStore(STORE).get(key);
-    tx.oncomplete = () => resolve(request.result ?? null);
-    tx.onabort = () => reject(tx.error || new Error('Unable to read protected local storage.'));
-    tx.onerror = () => reject(tx.error || new Error('Unable to read protected local storage.'));
-  }).finally(() => db.close());
-  // Preserve compatibility with v2 snapshots created before IndexedDB was available.
-  return value ?? (await Preferences.get({ key })).value;
+  const readKey = async (targetKey: string): Promise<string | null> => {
+    if (!usesIndexedDB()) return (await Preferences.get({ key: targetKey })).value;
+    const db = await database();
+    const value = await new Promise<string | null>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const request = tx.objectStore(STORE).get(targetKey);
+      tx.oncomplete = () => resolve(request.result ?? null);
+      tx.onabort = () => reject(tx.error || new Error('Unable to read protected local storage.'));
+      tx.onerror = () => reject(tx.error || new Error('Unable to read protected local storage.'));
+    }).finally(() => db.close());
+    // Preserve compatibility with v2 snapshots created before IndexedDB was available.
+    return value ?? (await Preferences.get({ key: targetKey })).value;
+  };
+
+  let result = await readKey(key);
+  // Non-destructive backward-compatible migration for Edo: if primary key is empty, check legacy unprefixed key
+  if (result === null && getActiveLanguage().id === 'edo' && key.startsWith('edo_')) {
+    const legacyKey = key.replace(/^edo_/, '');
+    const legacyValue = await readKey(legacyKey);
+    if (legacyValue !== null) {
+      result = legacyValue;
+      try {
+        await writeLibrarySnapshot(key, legacyValue);
+      } catch (_) {}
+    }
+  }
+  return result;
 }
 export async function writeLibrarySnapshot(key: string, value: string): Promise<void> {
   if (!usesIndexedDB()) { await Preferences.set({ key, value }); return; }

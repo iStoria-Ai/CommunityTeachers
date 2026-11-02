@@ -12,12 +12,16 @@
 import { digest } from './libraryProtection';
 import { recordingOwnerKey } from './recordingOwnership';
 import { EdoEntry } from '../types/edo';
+import { getActiveLanguage, edoConfig } from '../languages';
 
-export const DEFAULT_GATEWAY_URL =
-  'https://script.google.com/macros/s/AKfycbwcZHwplY338zxErFhNSKQBg6gDtPi1YLRa6sdrmKCD5DF0zVBIvVasGrT86czJy43w/exec';
+export const DEFAULT_GATEWAY_URL = edoConfig.gatewayUrl;
 
-const TOKEN_STORAGE_KEY = 'edo_contributor_auth_token_v1';
-const GATEWAY_URL_STORAGE_KEY = 'edo_gateway_url_v1';
+function getTokenStorageKey(): string {
+  return `${getActiveLanguage().storagePrefix}_contributor_auth_token_v1`;
+}
+function getGatewayUrlStorageKey(): string {
+  return `${getActiveLanguage().storagePrefix}_gateway_url_v1`;
+}
 
 export interface GatewayHealthResult {
   ok: boolean;
@@ -43,7 +47,17 @@ export interface GatewayDiagnostics {
  */
 export function getStoredContributorToken(): string {
   try {
-    return (typeof localStorage !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : '') || '';
+    const key = getTokenStorageKey();
+    let token = (typeof localStorage !== 'undefined' ? localStorage.getItem(key) : '') || '';
+    // Non-destructive fallback for legacy Edo token
+    if (!token && typeof localStorage !== 'undefined' && getActiveLanguage().id === 'edo') {
+      const legacy = localStorage.getItem('contributor_auth_token_v1');
+      if (legacy) {
+        token = legacy;
+        localStorage.setItem(key, legacy);
+      }
+    }
+    return token;
   } catch {
     return '';
   }
@@ -54,10 +68,11 @@ export function getStoredContributorToken(): string {
  */
 export function setStoredContributorToken(token: string): void {
   try {
+    const key = getTokenStorageKey();
     if (token.trim()) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
+      localStorage.setItem(key, token.trim());
     } else {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      localStorage.removeItem(key);
     }
   } catch (err) {
     console.warn('Unable to persist contributor token locally:', err);
@@ -65,18 +80,34 @@ export function setStoredContributorToken(token: string): void {
 }
 
 /**
+ * Returns default gateway URL for the active language.
+ * Urhobo is strictly prohibited from falling back to Edo's gateway if not configured.
+ * Never touches localStorage (safe for children library).
+ */
+export function getDefaultGatewayUrl(): string {
+  const lang = getActiveLanguage();
+  if (!lang.gatewayConfigured || !lang.gatewayUrl) {
+    throw new Error(
+      `The cloud gateway for ${lang.name} is not configured yet. Please configure the ${lang.name} Google Apps Script gateway.`
+    );
+  }
+  return lang.gatewayUrl;
+}
+
+/**
  * Gets the active Gateway URL (allows overriding in settings if needed).
+ * Urhobo is strictly prohibited from falling back to Edo's gateway if not configured.
  */
 export function getGatewayUrl(): string {
   try {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(GATEWAY_URL_STORAGE_KEY) : null;
+    const key = getGatewayUrlStorageKey();
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
     if (stored && stored.startsWith('https://script.google.com/macros/s/')) {
       return stored.trim();
     }
-    return DEFAULT_GATEWAY_URL;
-  } catch {
-    return DEFAULT_GATEWAY_URL;
-  }
+  } catch {}
+
+  return getDefaultGatewayUrl();
 }
 
 /**
@@ -84,10 +115,11 @@ export function getGatewayUrl(): string {
  */
 export function setGatewayUrl(url: string): void {
   try {
+    const key = getGatewayUrlStorageKey();
     if (url.trim()) {
-      localStorage.setItem(GATEWAY_URL_STORAGE_KEY, url.trim());
+      localStorage.setItem(key, url.trim());
     } else {
-      localStorage.removeItem(GATEWAY_URL_STORAGE_KEY);
+      localStorage.removeItem(key);
     }
   } catch (err) {
     console.warn('Unable to persist gateway URL locally:', err);
@@ -163,6 +195,7 @@ export async function pingGatewayPost(
   const startTime = Date.now();
   const payload = {
     action: 'ping',
+    language: getActiveLanguage().id,
     authToken: authToken.trim()
   };
 
@@ -368,6 +401,7 @@ export async function uploadRecordingToGateway(
 
   const payload = {
     action: 'upload_recording',
+    language: getActiveLanguage().id,
     ownerKey: await recordingOwnerKey(recordingId),
     authToken: token,
     lessonId,
@@ -483,6 +517,7 @@ export async function streamAudioFromGateway(
   try {
     const payload = {
       action: 'stream_audio',
+      language: getActiveLanguage().id,
       authToken: authToken.trim(),
       fileId: cleanId
     };
@@ -535,6 +570,7 @@ export async function fetchNeedsSpellingQueue(
   try {
     const payload = {
       action: 'get_needs_spelling',
+      language: getActiveLanguage().id,
       authToken: authToken.trim()
     };
     const response = await fetch(url, {
@@ -574,6 +610,7 @@ export async function submitSpellingToGateway(params: {
   }
   const payload = {
     action: 'submit_spelling',
+    language: getActiveLanguage().id,
     authToken: token,
     metadataFileId: metaId,
     edoSpelling: spelling
@@ -611,6 +648,7 @@ export async function adminLockEntry(
     const trimmed = credential.trim();
     const payload = {
       action: 'admin_lock_entry',
+      language: getActiveLanguage().id,
       authToken: trimmed,
       approvalCode: trimmed,
       metadataFileId: metadataFileId
@@ -644,6 +682,7 @@ export async function adminSetApprovalCode(
   try {
     const payload = {
       action: 'admin_set_approval_code',
+      language: getActiveLanguage().id,
       authToken: adminToken.trim(),
       approvalCode: approvalCode.trim()
     };
@@ -676,6 +715,7 @@ export async function adminUnlockEntry(
   try {
     const payload = {
       action: 'admin_unlock_entry',
+      language: getActiveLanguage().id,
       authToken: adminToken,
       metadataFileId: metadataFileId
     };
@@ -700,25 +740,16 @@ export async function adminUnlockEntry(
   }
 }
 
-const LISTENER_TOKEN_STORAGE_KEY = 'edo_anonymous_listener_id_v1';
-
-/**
- * Returns a stable, anonymous listener identifier for this browser instance.
- * Stored locally to prevent duplicate listener counts without tracking personal information.
- *
- * Anonymous Browser Limitation:
- * Without user accounts, separate browser profiles or cleared storage will generate
- * new tokens. This provides reasonable duplicate prevention without personal data.
- */
 export function getAnonymousListenerToken(): string {
   try {
     if (typeof localStorage === 'undefined') return 'anon-default';
-    let token = localStorage.getItem(LISTENER_TOKEN_STORAGE_KEY);
+    const key = `${getActiveLanguage().storagePrefix}_anonymous_listener_id_v1`;
+    let token = localStorage.getItem(key);
     if (!token || !/^[a-zA-Z0-9_-]{8,128}$/.test(token)) {
       token = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
         : 'ls-' + Math.random().toString(36).substring(2) + Date.now().toString(36);
-      localStorage.setItem(LISTENER_TOKEN_STORAGE_KEY, token);
+      localStorage.setItem(key, token);
     }
     return token;
   } catch {
@@ -739,6 +770,7 @@ export async function recordPlaybackToGateway(
   try {
     const payload = {
       action: 'record_playback',
+      language: getActiveLanguage().id,
       metadataFileId: metadataFileId.trim(),
       listenerToken: listenerToken.trim()
     };
@@ -780,6 +812,7 @@ export async function adminDeleteEntry(
   try {
     const payload = {
       action: 'admin_delete_entry',
+      language: getActiveLanguage().id,
       authToken: adminToken.trim(),
       metadataFileId: metadataFileId.trim()
     };
@@ -815,11 +848,22 @@ export interface QueuedUpload {
   lastError?: string;
 }
 
-const UPLOAD_QUEUE_KEY = 'edo_upload_queue_v1';
+function getUploadQueueKey(): string {
+  return `${getActiveLanguage().storagePrefix}_upload_queue_v1`;
+}
 
 export function getPersistentUploadQueue(): QueuedUpload[] {
   try {
-    const raw = localStorage.getItem(UPLOAD_QUEUE_KEY);
+    const key = getUploadQueueKey();
+    let raw = localStorage.getItem(key);
+    // Non-destructive fallback for legacy Edo upload queue
+    if (!raw && getActiveLanguage().id === 'edo') {
+      const legacyRaw = localStorage.getItem('upload_queue_v1') || localStorage.getItem('pending_upload_queue_v1');
+      if (legacyRaw) {
+        raw = legacyRaw;
+        try { localStorage.setItem(key, legacyRaw); } catch (_) {}
+      }
+    }
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -828,7 +872,7 @@ export function getPersistentUploadQueue(): QueuedUpload[] {
 
 export function savePersistentUploadQueue(queue: QueuedUpload[]): void {
   try {
-    localStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+    localStorage.setItem(getUploadQueueKey(), JSON.stringify(queue));
   } catch (err) {
     console.warn('Could not save persistent upload queue:', err);
   }
@@ -987,7 +1031,7 @@ function createTimeoutSignal(ms: number): AbortSignal {
 export async function fetchDriveCollectionStats(url = getGatewayUrl()): Promise<{ stats: DriveCollectionStats; checkedAt: string }> {
   const response = await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'get_collection_stats', authToken: getStoredContributorToken() }),
+    body: JSON.stringify({ action: 'get_collection_stats', language: getActiveLanguage().id, authToken: getStoredContributorToken() }),
     redirect: 'follow', mode: 'cors', cache: 'no-store', signal: createTimeoutSignal(20000)
   });
   if (!response.ok) throw new Error(`Google Drive returned HTTP ${response.status}.`);
@@ -1035,7 +1079,7 @@ export async function fetchCloudImageIndex(url = getGatewayUrl()): Promise<{ ok:
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'get_image_index' }),
+      body: JSON.stringify({ action: 'get_image_index', language: getActiveLanguage().id }),
       redirect: 'follow',
       mode: 'cors',
       signal: createTimeoutSignal(15000)
@@ -1063,6 +1107,7 @@ export async function saveCloudVocabularyImage(
     // and determines MIME type, source and licence itself.
     const payload = {
       action: 'save_vocabulary_image',
+      language: getActiveLanguage().id,
       english: params.english,
       category: params.category || 'Other',
       vocabId: params.vocabId,
@@ -1100,7 +1145,7 @@ export async function streamCloudImage(
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'stream_image', fileId: cleanId }),
+      body: JSON.stringify({ action: 'stream_image', language: getActiveLanguage().id, fileId: cleanId }),
       redirect: 'follow',
       mode: 'cors',
       signal: createTimeoutSignal(20000)

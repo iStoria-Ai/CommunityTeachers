@@ -2,6 +2,7 @@ import verifiedSubjects from '../data/vocabularyPictureSubjects.json';
 import starterVocabularyData from '../data/englishVocabulary.json';
 import placeholderAssetList from '../data/placeholderImages.json';
 import { readLibrarySnapshot, writeLibrarySnapshot } from './localLibraryStore';
+import { getActiveLanguage } from '../languages';
 import {
   fetchCloudImageIndex,
   saveCloudVocabularyImage,
@@ -736,10 +737,15 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
   if (readOnly) setImageServiceReadOnly(true);
   const writesAllowed = !readOnly && !imageServiceReadOnly;
 
+  const snapshotKey = `${getActiveLanguage().storagePrefix}_image_index_v1`;
+
   // 1. Local snapshot first for instant display (Studio only)
   if (writesAllowed) {
     try {
-      const cachedRaw = await readLibrarySnapshot('edo_image_index_v1');
+      let cachedRaw = await readLibrarySnapshot(snapshotKey);
+      if (!cachedRaw && getActiveLanguage().id === 'edo') {
+        cachedRaw = await readLibrarySnapshot('edo_image_index_v1');
+      }
       if (cachedRaw && typeof cachedRaw === 'string') {
         try {
           applyIndexEntries(JSON.parse(cachedRaw) as CloudImageIndex, false);
@@ -757,7 +763,7 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
     if (res.ok && res.index && res.index.images) {
       applyIndexEntries(res.index, true);
       if (writesAllowed) {
-        void writeLibrarySnapshot('edo_image_index_v1', JSON.stringify(res.index)).catch(() => { });
+        void writeLibrarySnapshot(snapshotKey, JSON.stringify(res.index)).catch(() => { });
       }
     }
   } catch (_) { }

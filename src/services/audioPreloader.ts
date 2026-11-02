@@ -27,6 +27,7 @@ import {
   deleteLibrarySnapshot
 } from './localLibraryStore';
 import { streamAudioFromGateway } from './cloudSyncService';
+import { getCommunityAudioKey } from './communityLibrary';
 
 export type AudioStatus = 'ready' | 'downloading' | 'failed' | 'pending' | 'none';
 
@@ -154,7 +155,7 @@ export function invalidateAudioPreload(fileId: string): void {
     }
   }
 
-  void deleteLibrarySnapshot('edo_community_audio_' + fileId).catch(() => {});
+  void deleteLibrarySnapshot(getCommunityAudioKey(fileId)).catch(() => {});
   notifyListeners();
 }
 
@@ -281,7 +282,7 @@ async function checkPersistentStorageBatch(fileIds: string[]): Promise<void> {
     const opts = fileOptionsMap.get(id);
     if (opts && opts.persistToStorage === false) continue;
     try {
-      const stored = await readLibrarySnapshot('edo_community_audio_' + id);
+      const stored = await readLibrarySnapshot(getCommunityAudioKey(id));
       if (stored && typeof stored === 'string' && stored.startsWith('data:audio/')) {
         setCachedSessionAudio(id, stored);
         readyAudioKeys.add(id);
@@ -328,7 +329,7 @@ function processPreloadQueue(): void {
       try {
         // Step 1: Check persistent storage before making network call (if allowed)
         if (persistToStorage) {
-          const stored = await readLibrarySnapshot('edo_community_audio_' + fileId);
+          const stored = await readLibrarySnapshot(getCommunityAudioKey(fileId));
           if (stored && typeof stored === 'string' && stored.startsWith('data:audio/')) {
             setCachedSessionAudio(fileId, stored);
             readyAudioKeys.add(fileId);
@@ -344,7 +345,7 @@ function processPreloadQueue(): void {
           setCachedSessionAudio(fileId, result.audioDataUrl);
           // Persist to storage in background if enabled
           if (persistToStorage) {
-            void writeLibrarySnapshot('edo_community_audio_' + fileId, result.audioDataUrl).catch(() => {});
+            void writeLibrarySnapshot(getCommunityAudioKey(fileId), result.audioDataUrl).catch(() => {});
           }
           readyAudioKeys.add(fileId);
           failedAudioKeys.delete(fileId);

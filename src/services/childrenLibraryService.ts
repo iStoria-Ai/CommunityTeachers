@@ -1,10 +1,11 @@
-import { DEFAULT_GATEWAY_URL } from './cloudSyncService';
+import { getDefaultGatewayUrl } from './cloudSyncService';
 import { EdoEntry } from '../types/edo';
 import { getCachedSessionAudio, setCachedSessionAudio, loadOrFetchAudio } from './audioService';
 
 // Intentionally stateless: never consult Studio credentials, caches, or upload queues.
 async function readGateway(payload: { action: 'get_library' } | { action: 'stream_audio'; fileId: string }, signal?: AbortSignal) {
-  const response = await fetch(DEFAULT_GATEWAY_URL, {
+  const gatewayUrl = getDefaultGatewayUrl();
+  const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(payload),

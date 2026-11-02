@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { X, Settings, Search, QrCode } from 'lucide-react';
+import { getActiveLanguage } from '../languages';
 
 export type HeaderTheme = 'default' | 'green' | 'blue' | 'yellow' | 'purple';
 
@@ -45,12 +46,15 @@ const THEME_STYLES: Record<
 
 export const StudioHeader: React.FC<StudioHeaderProps> = ({
   theme = 'default',
-  title = 'Edo',
+  title,
   sectionLabel,
   rightAction = 'none',
   onRightAction,
   onLogoClick
 }) => {
+  const activeLang = getActiveLanguage();
+  const [imageError, setImageError] = useState(false);
+  const displayTitle = title ?? activeLang.name;
   const style = THEME_STYLES[theme];
 
   return (
@@ -70,15 +74,22 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
           }`}
         >
           <div className="w-[42px] h-[42px] rounded-full overflow-hidden bg-[#F3EDE0] border border-[#DFD5C0] flex items-center justify-center shrink-0 shadow-sm">
-            <img
-              src={`${import.meta.env.BASE_URL}assets/edo-bronze-icon.jpg`}
-              alt="Edo Bronze Head Logo"
-              className="w-full h-full object-cover scale-110"
-            />
+            {imageError || !activeLang.emblemAsset ? (
+              <div className="w-full h-full flex items-center justify-center bg-[#EDE5D4] text-[#157A4C] font-bold text-[19px] select-none font-serif">
+                {activeLang.name.charAt(0)}
+              </div>
+            ) : (
+              <img
+                src={`${import.meta.env.BASE_URL}${activeLang.emblemAsset}`}
+                alt={`${activeLang.name} Emblem`}
+                onError={() => setImageError(true)}
+                className="w-full h-full object-cover scale-110"
+              />
+            )}
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-[18.5px] font-bold tracking-tight text-[#18241B] leading-tight truncate">
-              {title}
+              {displayTitle}
             </span>
             {sectionLabel && (
               <span

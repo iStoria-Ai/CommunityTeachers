@@ -11,6 +11,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { generateQRCode, getQRCodeSvgPath } from '../utils/qrCode';
+import { getActiveLanguage } from '../languages';
 
 export type QRModalType = 'teachers' | 'library';
 
@@ -32,11 +33,13 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   const [copied, setCopied] = useState(false);
 
   const isTeachers = type === 'teachers';
+  const lang = getActiveLanguage();
+  // Default addresses for official production domains (https://edo.communityteachers.info/ & https://edo.communityteachers.info/library/ for Edo)
   const resolvedUrl =
     targetUrl ||
     (isTeachers
-      ? 'https://edo.communityteachers.info/'
-      : 'https://edo.communityteachers.info/library/');
+      ? (lang.domainUrl || 'https://edo.communityteachers.info/')
+      : (lang.libraryUrl || 'https://edo.communityteachers.info/library/'));
 
   // Generate crisp QR SVG path memoized on the target URL
   const qrSvg = useMemo(() => {

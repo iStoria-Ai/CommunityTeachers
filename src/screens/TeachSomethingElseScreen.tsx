@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { StudioHeader } from '../components/StudioHeader';
 import { EdoLetterBar } from '../components/EdoLetterBar';
+import { getActiveLanguage } from '../languages';
 import {
   MicrophoneRecorder,
   playAudioRecording,
@@ -35,6 +36,7 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
   onSaveCustomContribution,
   onClose
 }) => {
+  const lang = getActiveLanguage();
   const [englishOrMainText, setEnglishOrMainText] = useState('');
   const [optionalEdoSpelling, setOptionalEdoSpelling] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -144,9 +146,9 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
 
     const statusMsg =
       audioDataUrl && trimmedEdo
-        ? 'Saved with both Edo writing and voice!'
+        ? `Saved with both ${lang.name} writing and voice!`
         : audioDataUrl && !trimmedEdo
-        ? 'Voice saved! Added to "Help Others" so someone can write the Edo spelling.'
+        ? `Voice saved! Added to "Help Others" so someone can write the ${lang.name} spelling.`
         : 'Written phrase saved! Added to "Help Others" so someone can record the pronunciation.';
 
     setSavedNotice(statusMsg);
@@ -177,7 +179,7 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
             </div>
             <div>
               <h1 className="text-[19px] font-bold text-[#18241B] leading-snug">
-                What would you like to teach me in Edo?
+                What would you like to teach me in {lang.name}?
               </h1>
               <p className="text-[13.5px] text-[#4C564F] font-medium mt-1 leading-snug">
                 You can teach a new word, phrase or sentence.
@@ -198,7 +200,7 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
               type="text"
               value={englishOrMainText}
               onChange={(e) => setEnglishOrMainText(e.target.value)}
-              placeholder="Type in English or Edo..."
+              placeholder={`Type in English or ${lang.name}...`}
               className="edo-input focus:border-[#157A4C] focus:ring-2 focus:ring-[#157A4C]/20"
             />
 
@@ -207,7 +209,7 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
               ref={edoInputRef}
               value={optionalEdoSpelling}
               onChange={(e) => setOptionalEdoSpelling(e.target.value)}
-              placeholder="Optional: Edo spelling (if you know it)..."
+              placeholder={`Optional: ${lang.name} spelling (if you know it)...`}
               className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-white/95 border border-[#DFD7C5] text-[16px] text-[#1C241E] placeholder-[#8C948E] focus:outline-none focus:border-[#157A4C]"
             />
 

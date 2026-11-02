@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { StudioStats } from '../types/edo';
 import { StudioHeader } from '../components/StudioHeader';
+import { getActiveLanguage } from '../languages';
 
 interface AiProgressScreenProps {
   stats: StudioStats;
@@ -23,6 +24,7 @@ export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
   stats: _localStats,
   onBackToDashboard
 }) => {
+  const lang = getActiveLanguage();
   const [cloud, setCloud] = useState<DriveCollectionStats | null>(null);
   const [checkedAt, setCheckedAt] = useState('');
   const [error, setError] = useState('');
@@ -86,7 +88,7 @@ export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
     },
     {
       id: 5,
-      title: 'Stage 5 – Speaking & asking questions in Edo',
+      title: `Stage 5 – Speaking & asking questions in ${lang.name}`,
       subtitle: '(Future AI capability — Not yet trained)',
       status: 'future'
     }
@@ -114,7 +116,7 @@ export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
               <span className="w-1.5 h-6 bg-[#6E4BC3] rounded-sm" />
             </div>
             <h1 className="text-[20px] font-bold text-[#1A241D]">
-              Our AI is learning Edo
+              Our AI is learning {lang.name}
             </h1>
           </div>
 
@@ -288,14 +290,14 @@ export const AiProgressScreen: React.FC<AiProgressScreenProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[13px] font-bold text-[#371F6E]">
-                  Future Feature: AI Speaks Edo
+                  Future Feature: AI Speaks {lang.name}
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-[#6E4BC3]/15 text-[#52349B] text-[10px] font-bold uppercase">
                   Planned
                 </span>
               </div>
               <p className="text-[11.5px] text-[#4E387E] leading-snug mt-0.5">
-                Once enough verified recordings are approved, the AI will ask questions in Edo and power the Edo Language API.
+                Once enough verified recordings are approved, the AI will ask questions in {lang.name} and power the {lang.name} Language API.
               </p>
             </div>
           </div>

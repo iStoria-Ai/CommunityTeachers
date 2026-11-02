@@ -3,15 +3,33 @@ import { recordingOwnerKey } from './recordingOwnership';
 import { digest } from './libraryProtection';
 import { getGatewayUrl, getStoredContributorToken, streamAudioFromGateway, submitSpellingToGateway, recordPlaybackToGateway, parseAudioDataUrl } from './cloudSyncService';
 import { readLibrarySnapshot, writeLibrarySnapshot, deleteLibrarySnapshot } from './localLibraryStore';
-import {
-  getCachedSessionAudio,
+import { getCachedSessionAudio,
   setCachedSessionAudio,
   invalidateSessionAudio,
   loadOrFetchAudio
 } from './audioService';
+import { getActiveLanguage } from '../languages';
 
-const CACHE_KEY = 'edo_community_library_v1';
-const DRAFT_KEY = 'edo_community_spelling_drafts_v1';
+export function getCommunityCacheKey(): string {
+  return `${getActiveLanguage().storagePrefix}_community_library_v1`;
+}
+
+export function getSpellingDraftKey(): string {
+  return `${getActiveLanguage().storagePrefix}_community_spelling_drafts_v1`;
+}
+
+export function getPendingEditsKey(): string {
+  return `${getActiveLanguage().storagePrefix}_pending_cloud_edits_v1`;
+}
+
+export function getCommunityAudioKey(fileId: string): string {
+  return `${getActiveLanguage().storagePrefix}_community_audio_${fileId}`;
+}
+
+export function getPendingEditsChangedEventName(): string {
+  return `${getActiveLanguage().storagePrefix}_pending_edits_changed`;
+}
+
 interface SpellingDraft { metadataFileId: string; text: string; error?: string }
 export interface CommunitySnapshot {
   entries: EdoEntry[];
@@ -56,7 +74,12 @@ export async function communityRequest(payload: Record<string, unknown>) {
   return data;
 }
 export async function readCommunityCache(): Promise<CommunitySnapshot | null> {
-  const raw = await readLibrarySnapshot(CACHE_KEY);
+  const primaryKey = getCommunityCacheKey();
+  let raw = await readLibrarySnapshot(primaryKey);
+  // Non-destructive backward compatibility: If Edo and primary key not found, check legacy key
+  if (!raw && getActiveLanguage().id === 'edo' && primaryKey !== 'edo_community_library_v1') {
+    raw = await readLibrarySnapshot('edo_community_library_v1');
+  }
   if (!raw) return null;
   const snapshot = JSON.parse(raw);
   if (!Array.isArray(snapshot.entries) || !Array.isArray(snapshot.answeredQuestionIds)) throw new Error('Community cache is unreadable; original device recordings are unchanged.');
@@ -79,7 +102,7 @@ export async function fetchCommunityLibrary(): Promise<CommunitySnapshot> {
     tombstones,
     answeredEnglish: Array.isArray(data.answeredEnglish) ? data.answeredEnglish : []
   };
-  await writeLibrarySnapshot(CACHE_KEY, JSON.stringify(snapshot));
+  await writeLibrarySnapshot(getCommunityCacheKey(), JSON.stringify(snapshot));
   return snapshot;
 }
 export async function fetchAnsweredQuestions(): Promise<string[]> {
@@ -234,7 +257,11 @@ export function getHelpOthersEligibleEntries(
   };
 }
 export async function readSpellingDrafts(): Promise<SpellingDraft[]> {
-  const raw = await readLibrarySnapshot(DRAFT_KEY);
+  const key = getSpellingDraftKey();
+  let raw = await readLibrarySnapshot(key);
+  if (!raw && getActiveLanguage().id === 'edo' && key !== 'edo_community_spelling_drafts_v1') {
+    raw = await readLibrarySnapshot('edo_community_spelling_drafts_v1');
+  }
   if (!raw) return [];
   const drafts = JSON.parse(raw);
   if (!Array.isArray(drafts)) throw new Error('Saved spelling drafts are unreadable.');
@@ -242,7 +269,8 @@ export async function readSpellingDrafts(): Promise<SpellingDraft[]> {
 }
 let draftTail: Promise<unknown> = Promise.resolve();
 async function editDrafts(action: (drafts: SpellingDraft[]) => SpellingDraft[]): Promise<void> {
-  const operation = async () => writeLibrarySnapshot(DRAFT_KEY, JSON.stringify(action(await readSpellingDrafts())));
+  const key = getSpellingDraftKey();
+  const operation = async () => writeLibrarySnapshot(key, JSON.stringify(action(await readSpellingDrafts())));
   const task = draftTail.then(operation, operation);
   draftTail = task.catch(() => undefined);
   await task;
@@ -272,7 +300,7 @@ export async function getCommunityAudio(entry: EdoEntry): Promise<string> {
   if (!entry.cloudAudioFileId) throw new Error('This contribution has no shared audio.');
 
   const cacheKey = entry.cloudAudioFileId;
-  const storageKey = 'edo_community_audio_' + entry.cloudAudioFileId;
+  const storageKey = getCommunityAudioKey(entry.cloudAudioFileId);
 
   // 1. Session memory cache (instant zero-latency playback)
   const cachedMemory = getCachedSessionAudio(cacheKey);
@@ -431,7 +459,11 @@ let editTail: Promise<unknown> = Promise.resolve();
 function notifyPendingEditsChanged(): void {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     try {
-      window.dispatchEvent(new CustomEvent('edo_pending_edits_changed'));
+      window.dispatchEvent(new CustomEvent(getPendingEditsChangedEventName()));
+      // Also dispatch legacy event for backward compatibility with older listeners
+      if (getActiveLanguage().id === 'edo') {
+        window.dispatchEvent(new CustomEvent('edo_pending_edits_changed'));
+      }
     } catch {
       // Ignore
     }
@@ -439,14 +471,18 @@ function notifyPendingEditsChanged(): void {
 }
 
 async function editCloudDrafts(action: (items: CloudEditDraft[]) => CloudEditDraft[]): Promise<void> {
+  const key = getPendingEditsKey();
   const write = async (): Promise<void> => {
-    const raw = await readLibrarySnapshot(EDIT_KEY);
-    await writeLibrarySnapshot(EDIT_KEY, JSON.stringify(action(raw ? JSON.parse(raw) : [])));
+    let raw = await readLibrarySnapshot(key);
+    if (!raw && getActiveLanguage().id === 'edo' && key !== 'edo_pending_cloud_edits_v1') {
+      raw = await readLibrarySnapshot('edo_pending_cloud_edits_v1');
+    }
+    await writeLibrarySnapshot(key, JSON.stringify(action(raw ? JSON.parse(raw) : [])));
     notifyPendingEditsChanged();
   };
   const run = async (): Promise<void> => {
     if (typeof navigator !== 'undefined' && 'locks' in navigator && navigator.locks) {
-      await navigator.locks.request(EDIT_KEY, write);
+      await navigator.locks.request(key, write);
     } else {
       await write();
     }
@@ -457,7 +493,11 @@ async function editCloudDrafts(action: (items: CloudEditDraft[]) => CloudEditDra
 }
 
 export async function readPendingCloudEdits(): Promise<CloudEditDraft[]> {
-  const raw = await readLibrarySnapshot(EDIT_KEY);
+  const key = getPendingEditsKey();
+  let raw = await readLibrarySnapshot(key);
+  if (!raw && getActiveLanguage().id === 'edo' && key !== 'edo_pending_cloud_edits_v1') {
+    raw = await readLibrarySnapshot('edo_pending_cloud_edits_v1');
+  }
   if (!raw) return [];
   try {
     const items = JSON.parse(raw);
@@ -488,7 +528,11 @@ export async function queueCommunityEdit(entry: EdoEntry, updates: CommunityEdit
 }
 
 export async function syncCommunityEdits(): Promise<void> {
-  const raw = await readLibrarySnapshot(EDIT_KEY);
+  const key = getPendingEditsKey();
+  let raw = await readLibrarySnapshot(key);
+  if (!raw && getActiveLanguage().id === 'edo' && key !== 'edo_pending_cloud_edits_v1') {
+    raw = await readLibrarySnapshot('edo_pending_cloud_edits_v1');
+  }
   const items: CloudEditDraft[] = raw ? JSON.parse(raw) : [];
   for (const draft of items) {
     if (draft.error) continue;
@@ -505,10 +549,10 @@ export async function syncCommunityEdits(): Promise<void> {
         }
         if (result.previousAudioFileId) {
           invalidateSessionAudio(result.previousAudioFileId);
-          await deleteLibrarySnapshot('edo_community_audio_' + result.previousAudioFileId);
+          await deleteLibrarySnapshot(getCommunityAudioKey(result.previousAudioFileId));
         }
         setCachedSessionAudio(result.audioFileId, stream.audioDataUrl);
-        await writeLibrarySnapshot('edo_community_audio_' + result.audioFileId, stream.audioDataUrl);
+        await writeLibrarySnapshot(getCommunityAudioKey(result.audioFileId), stream.audioDataUrl);
       }
       await editCloudDrafts(current => current.filter(item => item.id !== draft.id));
       notifyPendingEditsChanged();

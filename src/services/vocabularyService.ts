@@ -1,10 +1,16 @@
 import starterVocabularyData from '../data/englishVocabulary.json';
+import urhoboVocabularyData from '../data/urhoboVocabulary.json';
 import { EdoEntry, EntryCategory } from '../types/edo';
 import { getVocabularyImageUrl } from './imageService';
-import { INITIAL_EDO_ENTRIES } from './storageService';
+import { INITIAL_EDO_ENTRIES, getInitialLanguageEntries } from './storageService';
+import { getActiveLanguage } from '../languages';
 
-const VOCAB_CACHE_KEY = 'edo_online_vocabulary_v1';
-const LAST_FETCH_KEY = 'edo_online_vocab_last_fetch_ts';
+function getVocabCacheKey(): string {
+  return `${getActiveLanguage().storagePrefix}_online_vocabulary_v1`;
+}
+function getLastFetchKey(): string {
+  return `${getActiveLanguage().storagePrefix}_online_vocab_last_fetch_ts`;
+}
 const FETCH_COOLDOWN_MS = 30000; // 30-second cooldown between background fetches
 
 export interface RawVocabularyItem {
@@ -65,6 +71,34 @@ function mapRawToEdoEntry(item: RawVocabularyItem): EdoEntry {
  * Returns all built-in starter vocabulary prompts (130+ entries).
  */
 export function getStarterVocabulary(): EdoEntry[] {
+  const activeLang = getActiveLanguage();
+  if (activeLang.id === 'urhobo') {
+    const urhoboEntries: EdoEntry[] = (urhoboVocabularyData as any[]).map(item => ({
+      id: item.id,
+      english: item.english,
+      edoText: item.urhobo,
+      category: (item.category === 'Phrases' || item.category === 'Numbers') ? (item.english.includes('?') ? 'sentence' : 'phrase') : 'word',
+      topic: item.category,
+      illustrationKey: item.id.replace(/^urhobo-(word|phrase|sentence|num)-/, ''),
+      imageUrl: getVocabularyImageUrl({
+        id: item.id,
+        english: item.english,
+        illustrationKey: item.id.replace(/^urhobo-(word|phrase|sentence|num)-/, '')
+      }),
+      icon: item.icon || 'BookOpen',
+      emoji: item.emoji || '🗣️',
+      hasAudio: false,
+      audioDurationSec: 0,
+      status: item.urhobo ? 'needs_audio' : 'unanswered',
+      isSampleData: true,
+      updatedAt: '2026-11-01T12:00:00Z',
+      notes: `Starter prompt (pending native Urhobo speaker verification): ${item.notes || ''}`
+    }));
+    const englishEntries = (starterVocabularyData as RawVocabularyItem[]).map(mapRawToEdoEntry);
+    const seen = new Set(urhoboEntries.map(e => normalizeEnglish(e.english)));
+    const filteredEnglish = englishEntries.filter(e => !seen.has(normalizeEnglish(e.english)));
+    return [...urhoboEntries, ...filteredEnglish];
+  }
   return (starterVocabularyData as RawVocabularyItem[]).map(mapRawToEdoEntry);
 }
 
@@ -74,7 +108,7 @@ export function getStarterVocabulary(): EdoEntry[] {
 export function getCachedOnlineVocabulary(): EdoEntry[] {
   try {
     if (typeof localStorage === 'undefined') return [];
-    const raw = localStorage.getItem(VOCAB_CACHE_KEY);
+    const raw = localStorage.getItem(getVocabCacheKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -91,7 +125,7 @@ export function getCachedOnlineVocabulary(): EdoEntry[] {
 function saveCachedOnlineVocabulary(entries: EdoEntry[]): void {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(VOCAB_CACHE_KEY, JSON.stringify(entries));
+    localStorage.setItem(getVocabCacheKey(), JSON.stringify(entries));
   } catch (err) {
     console.warn('Failed to cache online vocabulary:', err);
   }
@@ -154,11 +188,11 @@ export async function fetchMoreOnlineVocabulary(
 ): Promise<EdoEntry[]> {
   try {
     if (typeof localStorage !== 'undefined') {
-      const lastFetch = Number(localStorage.getItem(LAST_FETCH_KEY) || 0);
+      const lastFetch = Number(localStorage.getItem(getLastFetchKey()) || 0);
       if (Date.now() - lastFetch < FETCH_COOLDOWN_MS) {
         return [];
       }
-      localStorage.setItem(LAST_FETCH_KEY, String(Date.now()));
+      localStorage.setItem(getLastFetchKey(), String(Date.now()));
     }
 
     // Pick a random topic to discover fresh everyday words
@@ -273,7 +307,8 @@ export function getAllVocabularyPrompts(): EdoEntry[] {
     }
   }
 
-  for (const entry of INITIAL_EDO_ENTRIES) {
+  const initial = getInitialLanguageEntries();
+  for (const entry of initial) {
     const norm = normalizeEnglish(entry.english);
     if (!seenNormalized.has(norm)) {
       seenNormalized.add(norm);

@@ -25,6 +25,7 @@ import { EdoEntry, TeachStepState } from '../types/edo';
 import { StudioHeader } from '../components/StudioHeader';
 import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
+import { getActiveLanguage } from '../languages';
 import {
   speakEnglishPrompt,
   stopEnglishPrompt,
@@ -68,6 +69,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
   onFinishForNow,
   onStepStateChange
 }) => {
+  const lang = getActiveLanguage();
   const [answeredIds, setAnsweredIds] = useState<Set<string> | null>(null);
   const [sessionQueue, setSessionQueue] = useState<string[]>([]);
   const [sessionCompletedIds, setSessionCompletedIds] = useState<Set<string>>(() => new Set());
@@ -384,7 +386,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
     setIsPlaying(false);
 
     if (!recordedAudioUrl || recordedDuration <= 0) {
-      setRecordingError('Please record your Edo pronunciation before saving.');
+      setRecordingError(`Please record your ${lang.name} pronunciation before saving.`);
       updateStep('prompt');
       return;
     }
@@ -412,7 +414,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
     const trimmed = writtenText.trim();
     if (!trimmed) {
       setWritingError(
-        'Please type the Edo word above, or tap "I can\'t write it (Keep voice & skip)" below.'
+        `Please type the ${lang.name} word above, or tap "I can't write it (Keep voice & skip)" below.`
       );
       return;
     }
@@ -483,7 +485,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
   if (stepState === 'prompt' && !isRecording && !recordedAudioUrl && (!answeredIds || !currentQuestion)) {
     return (
       <div className="edo-screen">
-        <StudioHeader theme="green" sectionLabel="Teach Edo" rightAction="close" onRightAction={onFinishForNow} />
+        <StudioHeader theme="green" sectionLabel={`Teach ${lang.name}`} rightAction="close" onRightAction={onFinishForNow} />
         <div className="p-6 text-center space-y-4 my-auto" role="status">
           <div className="w-14 h-14 rounded-full bg-[#E8F5E9] text-[#157A4C] flex items-center justify-center mx-auto">
             <Sparkles className="w-7 h-7" />
@@ -510,7 +512,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
       {/* Unified Top Studio Header */}
       <StudioHeader
         theme="green"
-        sectionLabel="Teach Edo"
+        sectionLabel={`Teach ${lang.name}`}
         rightAction="close"
         onRightAction={() => { if (confirmLeave()) onFinishForNow(); }}
         onLogoClick={() => { if (confirmLeave()) onFinishForNow(); }}
@@ -522,7 +524,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
         <div className="w-full px-5 pt-1 pb-1.5 shrink-0 flex items-center justify-between text-[13px] text-[#4E5B52] font-semibold">
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#157A4C] animate-pulse" />
-            <span>Everyday English → Edo Voice</span>
+            <span>Everyday English → {lang.name} Voice</span>
           </div>
 
         </div>
@@ -614,7 +616,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
             <div className="w-full flex flex-col items-center justify-between gap-3.5 my-auto pt-1">
               <div className="w-full flex flex-col items-center">
                 <p className="text-[20px] font-bold text-[#1E2B22] text-center mb-3">
-                  How do you say this in Edo?
+                  How do you say this in {lang.name}?
                 </p>
 
                 {/* Clear Error Banner for Permission Denial, Silent Mic, or Recording Error */}
@@ -636,7 +638,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                   <button
                     type="button"
                     onClick={handleToggleRecording}
-                    aria-label={isRecording ? 'Stop recording' : 'Start recording Edo translation'}
+                    aria-label={isRecording ? 'Stop recording' : `Start recording ${lang.name} translation`}
                     className={`relative z-10 w-[96px] h-[96px] rounded-full flex items-center justify-center shadow-lg border-4 transition-all ${
                       isRecording
                         ? 'bg-[#C93B2B] border-[#F8D7D3] scale-105'
@@ -721,7 +723,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                   </div>
                   <div className="flex items-center justify-between text-[12.5px] font-bold text-[#1B5E3E] mt-1.5">
                     <span className="truncate">
-                      {isPlaying ? 'Playing your Edo voice...' : 'Tap Play to listen'}
+                      {isPlaying ? `Playing your ${lang.name} voice...` : 'Tap Play to listen'}
                     </span>
                     <span className="shrink-0 ml-2">
                       {formatDuration(playbackSeconds)} / {formatDuration(recordedDuration)}
@@ -730,14 +732,14 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                 </div>
               </div>
 
-              <label className="text-sm font-semibold" htmlFor="recorded-edo-text">Edo translation (optional)</label>
+              <label className="text-sm font-semibold" htmlFor="recorded-edo-text">{lang.name} translation (optional)</label>
               <input
                 id="recorded-edo-text"
                 ref={recordedInputRef}
                 className="edo-input"
                 value={writtenText}
                 onChange={event => setWrittenText(event.target.value)}
-                placeholder="Type Edo translation, or leave empty"
+                placeholder={`Type ${lang.name} translation, or leave empty`}
               />
               <EdoLetterBar
                 inputRef={recordedInputRef}
@@ -791,7 +793,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                       Voice saved!
                     </p>
                     <p className="text-[14px] text-[#234836] font-medium leading-snug">
-                      Thank you! Can you also write &ldquo;{currentQuestion.english}&rdquo; in Edo?
+                      Thank you! Can you also write &ldquo;{currentQuestion.english}&rdquo; in {lang.name}?
                     </p>
                   </div>
                 </div>
@@ -825,7 +827,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                         });
                       }, 150);
                     }}
-                    placeholder="Type the Edo word here..."
+                    placeholder={`Type the ${lang.name} word here...`}
                     className="edo-input focus:border-[#157A4C] focus:ring-2 focus:ring-[#157A4C]/20"
                   />
 
@@ -884,12 +886,12 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
             </h2>
 
             <p className="mt-2 text-[15.5px] leading-relaxed text-[#424E45] font-medium max-w-[280px]">
-              Your contribution is saved and will help me learn Edo better.
+              Your contribution is saved and will help me learn {lang.name} better.
             </p>
 
             <div className="mt-3.5 px-4 py-1.5 rounded-2xl bg-[#E6F4ED] border border-[#C2E2D0] text-[#146940] text-[12.5px] font-bold">
               {savedModeNote === 'complete'
-                ? `Saved "${currentQuestion.english}" with voice & Edo writing`
+                ? `Saved "${currentQuestion.english}" with voice & ${lang.name} writing`
                 : `Voice saved for "${currentQuestion.english}" • Marked "Needs Writing"`}
             </div>
           </div>

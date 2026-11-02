@@ -22,6 +22,7 @@ import {
 } from '../services/audioService';
 import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
+import { getActiveLanguage } from '../languages';
 
 interface HelpOthersScreenProps {
   entries: EdoEntry[];
@@ -49,6 +50,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
   onAttachAudioToEntry,
   onBackToDashboard
 }) => {
+  const lang = getActiveLanguage();
   const [helpMode, setHelpMode] = useState<'write' | 'record'>('write');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [writtenAnswer, setWrittenAnswer] = useState('');
@@ -158,7 +160,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
     if (!currentItem || isSubmitting) return;
     const trimmed = writtenAnswer.trim();
     if (!trimmed) {
-      showTransientMessage('Please type the Edo writing or tap "Skip this" if unsure.');
+      showTransientMessage(`Please type the ${lang.name} writing or tap "Skip this" if unsure.`);
       return;
     }
     setIsSubmitting(true);
@@ -181,7 +183,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
 
     // Immediate acknowledgment with exact required phrasing
     showTransientMessage(
-      `Thank you! Your Edo contribution for "${savedEnglish}" was saved locally and is uploading in the background.`
+      `Thank you! Your ${lang.name} contribution for "${savedEnglish}" was saved locally and is uploading in the background.`
     );
 
     // Save locally and trigger background upload without blocking UI
@@ -287,7 +289,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
 
     // Immediate acknowledgment with exact required phrasing
     showTransientMessage(
-      `Thank you! Your Edo contribution for "${savedEnglish}" was saved locally and is uploading in the background.`
+      `Thank you! Your ${lang.name} contribution for "${savedEnglish}" was saved locally and is uploading in the background.`
     );
 
     // Save locally and trigger background upload without blocking UI
@@ -367,7 +369,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
               {communityError || !communityCheckedAt ? "Waiting for the shared collection" : "All caught up in this queue!"}
             </h2>
             <p className="text-[15px] text-[#556058] mt-1.5 mb-6">
-              Switch tabs above or teach a new word in Teach Edo.
+              Switch tabs above or teach a new word in Teach {lang.name}.
             </p>
             <button
               type="button"
@@ -418,7 +420,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
                       ? 'Loading audio recording'
                       : isPlaying
                       ? 'Pause audio'
-                      : 'Play existing Edo recording'
+                      : `Play existing ${lang.name} recording`
                   }
                   className="w-12 h-12 rounded-full bg-[#1D6CE0] hover:bg-[#1558BD] text-white flex items-center justify-center shrink-0 shadow-sm active:scale-95 transition disabled:opacity-90"
                 >
@@ -460,14 +462,14 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
               {/* Writing Question & Text Box */}
               <div className="pt-1">
                 <label className="block text-[18.5px] font-bold text-[#1C241E] mb-2">
-                  Can you write this in Edo?
+                  Can you write this in {lang.name}?
                 </label>
                 <input
                   type="text"
                   ref={writingInputRef}
                   value={writtenAnswer}
                   onChange={(e) => setWrittenAnswer(e.target.value)}
-                  placeholder="Type the Edo words you hear..."
+                  placeholder={`Type the ${lang.name} words you hear...`}
                   className="edo-input focus:border-[#1D6CE0] focus:ring-2 focus:ring-[#1D6CE0]/20"
                 />
 
@@ -512,7 +514,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
                   <FileEdit className="w-5 h-5" />
                 </div>
                 <p className="text-[14.5px] font-bold text-[#183C73] leading-snug">
-                  Someone wrote this in Edo. Can you record the pronunciation?
+                  Someone wrote this in {lang.name}. Can you record the pronunciation?
                 </p>
               </div>
 
@@ -530,7 +532,7 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
                   English: {currentItem.english}
                 </p>
                 <p className="text-[25px] font-bold text-[#1D6CE0] mt-0.5">
-                  Edo: {currentItem.edoText}
+                  {lang.name}: {currentItem.edoText}
                 </p>
               </div>
 

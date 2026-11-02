@@ -2,6 +2,7 @@ import React from 'react';
 import { Mic, Users, BookOpen, BarChart3, Home, MessageSquarePlus } from 'lucide-react';
 import { AppSection, StudioStats } from '../types/edo';
 import { StudioHeader } from '../components/StudioHeader';
+import { getActiveLanguage } from '../languages';
 
 interface DashboardScreenProps {
   onNavigate: (section: AppSection) => void;
@@ -14,12 +15,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onOpenSystemInfo,
   stats
 }) => {
+  const lang = getActiveLanguage();
+
   return (
     <div className="edo-screen">
       {/* Unified Studio Header */}
       <StudioHeader
         theme="default"
-        title="Edo"
+        title={lang.name}
         sectionLabel="Community Teachers"
         rightAction="settings"
         onRightAction={onOpenSystemInfo}
@@ -31,13 +34,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* Greeting Subtitle */}
         <div className="py-1.5 text-center shrink-0">
           <p className="text-[20px] font-bold text-[#1E2A21] tracking-tight">
-            Help me learn Edo today.
+            Help me learn {lang.name} today.
           </p>
         </div>
 
         {/* 2 x 2 Evenly Sized Colored Dashboard Cards Grid */}
         <div className="w-full flex-1 grid grid-cols-2 grid-rows-2 gap-3.5 my-1 min-h-[320px]">
-          {/* 1. GREEN — Teach Edo */}
+          {/* 1. GREEN — Teach Language */}
           <button
             type="button"
             onClick={() => onNavigate('teach')}
@@ -47,10 +50,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               <Mic className="w-6 h-6 stroke-[2.3] text-white" />
             </div>
             <h2 className="text-[19px] font-bold leading-tight mb-1">
-              Teach Edo
+              Teach {lang.name}
             </h2>
             <p className="text-[13px] leading-snug text-white/95 font-medium max-w-[142px]">
-              Answer a word and teach me Edo.
+              Answer a word and teach me {lang.name}.
             </p>
           </button>
 
@@ -108,7 +111,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               AI Progress
             </h2>
             <p className="text-[13px] leading-snug text-white/95 font-medium max-w-[142px]">
-              See how our Edo language library is growing.
+              See how our {lang.name} language library is growing.
             </p>
           </button>
         </div>

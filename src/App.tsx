@@ -37,8 +37,10 @@ import {
   saveRecordingInformation,
   computeStudioStats,
   INITIAL_EDO_ENTRIES,
+  getInitialLanguageEntries,
   TEACH_QUESTION_IDS
 } from './services/storageService';
+import { getActiveLanguage } from './languages';
 import {
   getAllVocabularyPrompts,
   normalizeEnglish,
@@ -71,7 +73,7 @@ function safeUUID(): string {
 
 export const App: React.FC = () => {
   const [libraryInfo, setLibraryInfo] = useState<LocalLibrary | null>(null);
-  const [entries, setEntries] = useState<EdoEntry[]>(INITIAL_EDO_ENTRIES);
+  const [entries, setEntries] = useState<EdoEntry[]>(() => getInitialLanguageEntries());
   const [activeSection, setActiveSection] = useState<AppSection>('welcome');
   const [teachStepState, setTeachStepState] = useState<TeachStepState>('prompt');
   const [viewMode, setViewMode] = useState<'single' | 'storyboard'>('single');
@@ -169,6 +171,10 @@ export const App: React.FC = () => {
   }, [sharedEntries]);
 
   useEffect(() => {
+    const activeLang = getActiveLanguage();
+    if (typeof document !== 'undefined') {
+      document.title = `${activeLang.name} — Community Teachers`;
+    }
     loadLibrary().then((loaded) => {
       // Safely migrate only genuine unsynchronized local recordings into the upload queue
       for (const entry of loaded.entries) {
@@ -936,13 +942,13 @@ export const App: React.FC = () => {
           >
             <div className="flex items-center justify-between pb-3 border-b border-[#E5DEC9]">
               <div className="flex items-center gap-2.5">
-                <img
-                  src={`${import.meta.env.BASE_URL}assets/edo-bronze-icon.jpg`}
-                  alt=""
-                  className="w-8 h-8 rounded-full object-cover"
-                />
+                <div className="w-8 h-8 rounded-full overflow-hidden bg-[#EAE2D0] border border-[#D5CCB8] flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-[#157A4C] font-serif">
+                    {getActiveLanguage().name.charAt(0)}
+                  </span>
+                </div>
                 <h2 className="text-[19px] font-bold">
-                  Community Teachers — Info
+                  {getActiveLanguage().name} Community Teachers — Info
                 </h2>
               </div>
               <button
@@ -961,7 +967,7 @@ export const App: React.FC = () => {
                   <span>Community Language Preservation Prototype</span>
                 </h3>
                 <p className="text-[#3C473F] text-[12.5px]">
-                  Community Teachers helps speakers record and write Edo words and phrases. Recordings and text are stored locally on your device.
+                  Community Teachers helps speakers record and write {getActiveLanguage().name} words and phrases. Recordings and text are stored locally on your device.
                 </p>
               </div>
 

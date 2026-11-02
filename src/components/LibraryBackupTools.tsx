@@ -5,6 +5,7 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { exportLibrary, importLibrary } from '../services/storageService';
 import { MAX_BACKUP_BYTES, parseBackup } from '../services/libraryProtection';
 import { getStoredContributorToken, setStoredContributorToken } from '../services/cloudSyncService';
+import { getActiveLanguage } from '../languages';
 
 interface Props {
   queueCount: number;
@@ -35,11 +36,12 @@ export function LibraryBackupTools({ queueCount, recordingCount, onLibraryChange
       <p className="text-xs text-[#56625A]">Backups include original audio, speaker information, and permissions. Files are not encrypted; keep your backup private. Recordings are saved locally and queued for Google Drive sync.</p>
       <div className="flex gap-2">
         <button disabled={busy} type="button" className="edo-secondary-btn flex-1" onClick={() => void run(async () => {
+          const lang = getActiveLanguage();
           const text = await exportLibrary();
-          const filename = `edo-library-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+          const filename = `${lang.id}-library-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
           if (Capacitor.isNativePlatform()) {
             const result = await Filesystem.writeFile({ path: filename, data: text, directory: Directory.Cache, encoding: Encoding.UTF8 });
-            await Share.share({ title: 'Edo Language Studio backup', dialogTitle: 'Save your private library backup', files: [result.uri] });
+            await Share.share({ title: `${lang.name} Language Studio backup`, dialogTitle: 'Save your private library backup', files: [result.uri] });
             setMessage('Backup save/share dialog completed. Make sure you saved the file outside the app; dismissing the dialog does not create an external backup.');
           } else {
             const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
