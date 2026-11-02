@@ -448,6 +448,8 @@ console.log('--- Test 9: PWA Manifests, Install Invitation, 14-Day Dismissal & W
 
 const edoManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-edo.webmanifest'), 'utf8'));
 const urhManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-urhobo.webmanifest'), 'utf8'));
+const edoLibManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-edo-library.webmanifest'), 'utf8'));
+const urhLibManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-urhobo-library.webmanifest'), 'utf8'));
 
 assert.equal(edoManifest.name, 'Edo Community Teachers', 'Edo manifest name must be Edo Community Teachers');
 assert.equal(edoManifest.display, 'standalone', 'Edo manifest must launch in standalone mode');
@@ -462,6 +464,26 @@ assert.ok(urhManifest.icons.some(i => i.src.includes('urhobo-icon-192.png') && i
 assert.ok(urhManifest.icons.some(i => i.src.includes('urhobo-icon-512.png') && i.sizes === '512x512'));
 assert.notEqual(edoManifest.id, urhManifest.id, 'Edo and Urhobo PWA manifests must have distinct installation IDs');
 
+// Verify dedicated Community Library manifests open directly to /library/
+assert.equal(edoLibManifest.name, 'Edo Community Library', 'Edo Library manifest name must be Edo Community Library');
+assert.equal(edoLibManifest.short_name, 'Edo Library');
+assert.equal(edoLibManifest.display, 'standalone', 'Edo Library manifest must launch in standalone mode');
+assert.equal(edoLibManifest.start_url, '/library/', 'Edo Library manifest must specify /library/ start_url');
+assert.equal(edoLibManifest.scope, '/library/', 'Edo Library manifest must specify /library/ scope');
+assert.ok(edoLibManifest.icons.some(i => i.src.includes('edo-icon-192.png') && i.sizes === '192x192'));
+assert.ok(edoLibManifest.icons.some(i => i.src.includes('edo-icon-512.png') && i.sizes === '512x512'));
+
+assert.equal(urhLibManifest.name, 'Urhobo Community Library', 'Urhobo Library manifest name must be Urhobo Community Library');
+assert.equal(urhLibManifest.short_name, 'Urhobo Library');
+assert.equal(urhLibManifest.display, 'standalone', 'Urhobo Library manifest must launch in standalone mode');
+assert.equal(urhLibManifest.start_url, '/library/', 'Urhobo Library manifest must specify /library/ start_url');
+assert.equal(urhLibManifest.scope, '/library/', 'Urhobo Library manifest must specify /library/ scope');
+assert.ok(urhLibManifest.icons.some(i => i.src.includes('urhobo-icon-192.png') && i.sizes === '192x192'));
+assert.ok(urhLibManifest.icons.some(i => i.src.includes('urhobo-icon-512.png') && i.sizes === '512x512'));
+assert.notEqual(edoLibManifest.id, urhLibManifest.id, 'Edo and Urhobo Library manifests must have distinct IDs');
+assert.notEqual(edoLibManifest.id, edoManifest.id, 'Edo Library and Edo Teachers manifests must have distinct IDs');
+assert.notEqual(urhLibManifest.id, urhManifest.id, 'Urhobo Library and Urhobo Teachers manifests must have distinct IDs');
+
 // Verify icon assets exist on disk
 for (const iconFile of ['edo-icon-192.png', 'edo-icon-512.png', 'urhobo-icon-192.png', 'urhobo-icon-512.png']) {
   const iconPath = path.join(__dirname, '../public/assets', iconFile);
@@ -475,10 +497,14 @@ assert.ok(!swSource.includes('cache.put(') && !swSource.includes('cache.addAll('
 
 // Verify HTML & Vite config WhatsApp Open Graph preview support for both languages
 const indexHtml = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+const libraryHtml = fs.readFileSync(path.join(__dirname, '../library/index.html'), 'utf8');
 const viteConfig = fs.readFileSync(path.join(__dirname, '../vite.config.ts'), 'utf8');
 assert.ok(indexHtml.includes('property="og:image" content="https://edo.communityteachers.info/assets/edo-welcome-hero.jpg"'));
 assert.ok(indexHtml.includes('manifest-edo.webmanifest'));
+assert.ok(libraryHtml.includes('manifest-edo-library.webmanifest'), 'Library HTML must link to manifest-edo-library.webmanifest');
+assert.ok(libraryHtml.includes('name="apple-mobile-web-app-title" content="Edo Community Library"'), 'Library HTML must set apple-mobile-web-app-title to Edo Community Library');
 assert.ok(viteConfig.includes('assets/urhobo-welcome-hero.jpg'), 'Vite config must transform og:image for Urhobo builds');
+assert.ok(viteConfig.includes('manifest-urhobo-library.webmanifest'), 'Vite config must transform Library manifest for Urhobo builds');
 assert.ok(viteConfig.includes('manifest-urhobo.webmanifest'), 'Vite config must transform manifest for Urhobo builds');
 
 // Verify platform detection (Android vs iPhone/iOS)
@@ -569,12 +595,44 @@ api.triggerNativeInstallPrompt('edo').then((outcome) => {
   api.setDeferredInstallPromptForTest(null);
 });
 
-// Verify PWAInstallPrompt UI component source includes honest iOS instructions and Android Install App button
+// Verify PWAInstallPrompt UI component source includes honest iOS instructions and Android Install App / Install Library button
 const pwaComponentSource = fs.readFileSync(path.join(__dirname, '../src/components/PWAInstallPrompt.tsx'), 'utf8');
 assert.ok(pwaComponentSource.includes('Add to Home Screen'), 'iOS prompt must instruct Add to Home Screen');
 assert.ok(pwaComponentSource.includes('Open as Web App'), 'iOS prompt must mention Open as Web App');
 assert.ok(pwaComponentSource.includes('Install App'), 'Android prompt must render Install App button');
+assert.ok(pwaComponentSource.includes('Install Library'), 'Library prompt must render Install Library button');
 assert.ok(!/automatic(ally)?\s+install/i.test(pwaComponentSource), 'Must never claim automatic installation on iPhone');
+
+// Verify manual "Install Library" button (requestInstallApp) works even when the 14-day automatic invitation was dismissed
+api.dismissInstallPrompt('edo', baseTime, true);
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'edo',
+    ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)',
+    now: baseTime + 1000,
+    win: { location: { pathname: '/library/' } },
+    isLibrary: true
+  }),
+  false,
+  'Automatic Library invitation is hidden after dismissal'
+);
+api.requestInstallApp('edo').then((res) => {
+  assert.equal(res, 'manual_shown', 'Tapping Install Library without deferredPrompt opens manual installation popup');
+  assert.equal(api.isManualInstallModalOpen(), true);
+  assert.equal(
+    api.shouldShowInstallInvitation({
+      storagePrefix: 'edo',
+      ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)',
+      now: baseTime + 1000,
+      win: { location: { pathname: '/library/' } },
+      isLibrary: true
+    }),
+    true,
+    'Install Library button must open the installation popup even when automatic invitation was previously dismissed'
+  );
+  api.closeManualInstallModal();
+  api.clearInstallPromptDismissal('edo');
+});
 
 console.log('✓ PWA manifests, platform detection, 14-day dismissal, standalone mode suppression, and WhatsApp previews verified.');
 

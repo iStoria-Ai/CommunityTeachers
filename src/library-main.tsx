@@ -7,6 +7,6 @@ import './index.css';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ChildrenLibraryScreen />
-    <PWAInstallPrompt />
+    <PWAInstallPrompt mode="library" />
   </React.StrictMode>
 );

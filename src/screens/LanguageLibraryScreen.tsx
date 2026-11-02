@@ -14,7 +14,8 @@ import {
   ChevronRight,
   Loader2,
   RotateCcw,
-  Upload
+  Upload,
+  Download
 } from 'lucide-react';
 import { getChildrenAudio } from '../services/childrenLibraryService';
 import { EdoEntry } from '../types/edo';
@@ -23,6 +24,7 @@ import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
 import { QRCodeModal } from '../components/QRCodeModal';
 import { getActiveLanguage } from '../languages';
+import { isRunningStandalone, requestInstallApp, subscribePWAState } from '../services/pwaService';
 import { playAudioRecording, stopActivePlayback, MicrophoneRecorder, releaseMicrophoneStream, invalidateSessionAudio, createPrimedAudioElement, getCachedSessionAudio } from '../services/audioService';
 import {
   getCommunityAudio,
@@ -275,9 +277,16 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   // Re-render when background audio downloads complete or status changes
   const [, setAudioTick] = useState(0);
   useEffect(() => {
-    return subscribeAudioReadiness(() => {
+    const unsubAudio = subscribeAudioReadiness(() => {
       setAudioTick((t) => t + 1);
     });
+    const unsubPwa = subscribePWAState(() => {
+      setAudioTick((t) => t + 1);
+    });
+    return () => {
+      unsubAudio();
+      unsubPwa();
+    };
   }, []);
 
   // Synchronize shared image index and enqueue missing entries quietly
@@ -1016,10 +1025,23 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
         onLogoClick={readOnly ? undefined : onBackToDashboard}
       />
 
-      {/* Subtitle / Counter */}
-      <p className="px-5 pt-1 pb-1 text-xs text-[#556058] font-medium" role="status">
-        {completedEntries.length} completed {completedEntries.length === 1 ? 'lesson' : 'lessons'} in Library
-      </p>
+      {/* Subtitle / Counter & Install Library Button */}
+      <div className="px-5 pt-1 pb-1.5 flex items-center justify-between gap-2 shrink-0">
+        <p className="text-xs text-[#556058] font-medium" role="status">
+          {completedEntries.length} completed {completedEntries.length === 1 ? 'lesson' : 'lessons'} in Library
+        </p>
+        {readOnly && !isRunningStandalone() && (
+          <button
+            type="button"
+            onClick={() => void requestInstallApp(lang.storagePrefix)}
+            aria-label={`Install ${lang.name} Community Library`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#157A4C] hover:bg-[#11643E] active:scale-95 text-white font-bold text-[12px] leading-none shadow-xs transition shrink-0"
+          >
+            <Download className="w-3.5 h-3.5 stroke-[2.3]" />
+            <span>Install Library</span>
+          </button>
+        )}
+      </div>
 
       {communityError && <p role="status" className="mx-5 text-xs text-[#56625A]">{communityCheckedAt ? 'Showing previously received lessons. Reconnecting when the internet is available.' : 'Connect to the internet to load the community Library.'}</p>}
       {/* Search Bar & Filter Pills (px-5) */}

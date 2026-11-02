@@ -13,6 +13,7 @@ export type MobilePlatform = 'ios' | 'android' | 'other';
 
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
 let sessionAccepted = false;
+let manualInstallModalOpen = false;
 let initialized = false;
 const memoryDismissedUntil = new Map<string, number>();
 const listeners = new Set<() => void>();
@@ -32,8 +33,28 @@ export function subscribePWAState(listener: () => void): () => void {
   };
 }
 
-export function getDismissStorageKey(storagePrefix = getActiveLanguage().storagePrefix): string {
-  return `${storagePrefix}_pwa_install_dismissed_until_v1`;
+export function isLibraryPath(
+  win: any = typeof window !== 'undefined' ? window : undefined
+): boolean {
+  try {
+    return Boolean(
+      win &&
+        win.location &&
+        typeof win.location.pathname === 'string' &&
+        win.location.pathname.includes('/library')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+export function getDismissStorageKey(
+  storagePrefix = getActiveLanguage().storagePrefix,
+  isLibrary = isLibraryPath()
+): string {
+  return isLibrary
+    ? `${storagePrefix}_library_pwa_install_dismissed_until_v1`
+    : `${storagePrefix}_pwa_install_dismissed_until_v1`;
 }
 
 export function detectMobilePlatform(
@@ -113,9 +134,10 @@ export function isRunningStandalone(
  */
 export function isInstallPromptDismissed(
   storagePrefix = getActiveLanguage().storagePrefix,
-  now = Date.now()
+  now = Date.now(),
+  isLibrary = isLibraryPath()
 ): boolean {
-  const key = getDismissStorageKey(storagePrefix);
+  const key = getDismissStorageKey(storagePrefix, isLibrary);
   const memVal = memoryDismissedUntil.get(key);
   if (typeof memVal === 'number' && now < memVal) {
     return true;
@@ -141,11 +163,13 @@ export function isInstallPromptDismissed(
  */
 export function dismissInstallPrompt(
   storagePrefix = getActiveLanguage().storagePrefix,
-  now = Date.now()
+  now = Date.now(),
+  isLibrary = isLibraryPath()
 ): number {
   const until = now + PWA_DISMISS_COOLDOWN_MS;
-  const key = getDismissStorageKey(storagePrefix);
+  const key = getDismissStorageKey(storagePrefix, isLibrary);
   memoryDismissedUntil.set(key, until);
+  manualInstallModalOpen = false;
 
   try {
     if (typeof localStorage !== 'undefined') {
@@ -158,15 +182,25 @@ export function dismissInstallPrompt(
 }
 
 export function clearInstallPromptDismissal(
-  storagePrefix = getActiveLanguage().storagePrefix
+  storagePrefix = getActiveLanguage().storagePrefix,
+  isLibrary?: boolean
 ): void {
-  const key = getDismissStorageKey(storagePrefix);
-  memoryDismissedUntil.delete(key);
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(key);
-    }
-  } catch (_) {}
+  const keys =
+    typeof isLibrary === 'boolean'
+      ? [getDismissStorageKey(storagePrefix, isLibrary)]
+      : [
+          getDismissStorageKey(storagePrefix, false),
+          getDismissStorageKey(storagePrefix, true)
+        ];
+  manualInstallModalOpen = false;
+  for (const key of keys) {
+    memoryDismissedUntil.delete(key);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+    } catch (_) {}
+  }
   notifyListeners();
 }
 
@@ -177,7 +211,24 @@ export function hasDeferredInstallPrompt(): boolean {
 export function setDeferredInstallPromptForTest(promptEvent: BeforeInstallPromptEvent | null): void {
   deferredPrompt = promptEvent;
   sessionAccepted = false;
+  manualInstallModalOpen = false;
   notifyListeners();
+}
+
+export function isManualInstallModalOpen(): boolean {
+  return manualInstallModalOpen;
+}
+
+export function openManualInstallModal(): void {
+  manualInstallModalOpen = true;
+  notifyListeners();
+}
+
+export function closeManualInstallModal(): void {
+  if (manualInstallModalOpen) {
+    manualInstallModalOpen = false;
+    notifyListeners();
+  }
 }
 
 export async function triggerNativeInstallPrompt(
@@ -193,6 +244,7 @@ export async function triggerNativeInstallPrompt(
     const choice = await currentPrompt.userChoice;
     if (choice && choice.outcome === 'accepted') {
       sessionAccepted = true;
+      manualInstallModalOpen = false;
       notifyListeners();
       return 'accepted';
     }
@@ -204,6 +256,28 @@ export async function triggerNativeInstallPrompt(
   }
 }
 
+/**
+ * Triggered when a user explicitly taps the visible "Install Library" (or "Install App") button.
+ * Works even when the automatic 14-day invitation was previously dismissed.
+ * - On Android when native `beforeinstallprompt` is ready, immediately invokes the native prompt.
+ * - Otherwise opens the install instructions popup/modal.
+ */
+export async function requestInstallApp(
+  storagePrefix = getActiveLanguage().storagePrefix
+): Promise<'accepted' | 'dismissed' | 'manual_shown'> {
+  if (deferredPrompt) {
+    const outcome = await triggerNativeInstallPrompt(storagePrefix);
+    if (outcome === 'accepted' || outcome === 'dismissed') {
+      manualInstallModalOpen = false;
+      notifyListeners();
+      return outcome;
+    }
+  }
+  manualInstallModalOpen = true;
+  notifyListeners();
+  return 'manual_shown';
+}
+
 export function shouldShowInstallInvitation(options?: {
   storagePrefix?: string;
   ua?: string;
@@ -213,16 +287,22 @@ export function shouldShowInstallInvitation(options?: {
   win?: any;
   nav?: any;
   doc?: any;
+  isLibrary?: boolean;
 }): boolean {
   const lang = getActiveLanguage();
   const storagePrefix = options?.storagePrefix || lang.storagePrefix;
   const now = options?.now ?? Date.now();
+  const isLib = options?.isLibrary ?? isLibraryPath(options?.win);
 
   if (isRunningStandalone(options?.win, options?.nav, options?.doc)) {
     return false;
   }
 
-  if (isInstallPromptDismissed(storagePrefix, now)) {
+  if (manualInstallModalOpen) {
+    return true;
+  }
+
+  if (isInstallPromptDismissed(storagePrefix, now, isLib)) {
     return false;
   }
 
@@ -249,18 +329,22 @@ export function initPWAService(): void {
 
   try {
     const lang = getActiveLanguage();
-    const isLibraryPath = window.location.pathname.includes('/library');
-    const appTitle = `${lang.name} Community Teachers`;
+    const isLib = isLibraryPath(window);
+    const appTitle = isLib
+      ? `${lang.name} Community Library`
+      : `${lang.name} Community Teachers`;
     const baseUrl = (import.meta as any)?.env?.BASE_URL || '/';
     const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 
     if (typeof document !== 'undefined') {
-      document.title = isLibraryPath
+      document.title = isLib
         ? `${lang.name} — Community Library`
         : `${lang.name} — Community Teachers`;
 
       const manifestLink = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
-      const targetManifest = `${cleanBase}manifest-${lang.id}.webmanifest`;
+      const targetManifest = isLib
+        ? `${cleanBase}manifest-${lang.id}-library.webmanifest`
+        : `${cleanBase}manifest-${lang.id}.webmanifest`;
       if (manifestLink && manifestLink.getAttribute('href') !== targetManifest) {
         manifestLink.setAttribute('href', targetManifest);
       }
@@ -292,6 +376,7 @@ export function initPWAService(): void {
       window.addEventListener('appinstalled', () => {
         deferredPrompt = null;
         sessionAccepted = true;
+        manualInstallModalOpen = false;
         notifyListeners();
       });
 
@@ -308,11 +393,17 @@ export function initPWAService(): void {
         'serviceWorker' in navigator &&
         (window.location.protocol === 'https:' || window.location.hostname === 'localhost')
       ) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register(`${cleanBase}sw.js`).catch(() => {});
-        });
+        const registerSw = () => {
+          navigator.serviceWorker
+            .register(`${cleanBase}sw.js`, { scope: cleanBase })
+            .catch(() => {});
+        };
+        if (typeof document !== 'undefined' && document.readyState === 'complete') {
+          registerSw();
+        } else {
+          window.addEventListener('load', registerSw, { once: true });
+        }
       }
     }
   } catch (_) {}
 }
-

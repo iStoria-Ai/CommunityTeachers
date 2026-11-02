@@ -20,6 +20,7 @@ function languageHtmlPlugin(): Plugin {
         .replace(/assets\/edo-bronze-icon\.jpg/g, 'assets/urhobo-emblem.jpg')
         .replace(/assets\/edo-icon-192\.png/g, 'assets/urhobo-icon-192.png')
         .replace(/assets\/edo-icon-512\.png/g, 'assets/urhobo-icon-512.png')
+        .replace(/manifest-edo-library\.webmanifest/g, 'manifest-urhobo-library.webmanifest')
         .replace(/manifest-edo\.webmanifest/g, 'manifest-urhobo.webmanifest');
     }
   };

@@ -46,6 +46,8 @@ const lesson = { id: 'cloud-real', recordingId: 'real', english: 'Water', edoTex
   const entries = [lesson, { ...lesson, id: 'cloud-denied', playbackPermission: 'denied' }, { ...lesson, id: 'cloud-incomplete', edoText: '' }, { ...lesson, id: 'cloud-test-fixture' }];
   const child = renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, { entries, readOnly: true, onBackToDashboard() {} }));
   assert.match(child, /1 completed lesson/);
+  assert.match(child, /Install Library/);
+  assert.match(child, /aria-label="Install Edo Community Library"/);
   assert.match(child, /Play recorded Edo pronunciation for Water/);
   assert.match(child, /verified\/water.svg|word-water.jpg/);
   assert.doesNotMatch(child, /aria-label="Edit|Protected lesson:|aria-label="close"|Administrator|<textarea|type="file"/);
@@ -54,6 +56,7 @@ const lesson = { id: 'cloud-real', recordingId: 'real', english: 'Water', edoTex
   const adult = renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, { entries: [lesson], onBackToDashboard() {} }));
   assert.match(adult, /aria-label="Edit Water"/);
   assert.match(adult, /aria-label="close"/);
+  assert.doesNotMatch(adult, /Install Library/);
   // Unknown pictures must also bypass the shared image cache.
   renderToStaticMarkup(React.createElement(api.LanguageLibraryScreen, { entries: [{ ...lesson, english: 'An unknown picture subject' }], readOnly: true, onBackToDashboard() {} }));
   assert.equal(storageAccesses, 0);

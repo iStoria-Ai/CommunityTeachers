@@ -7,25 +7,42 @@ import {
   shouldShowInstallInvitation,
   detectMobilePlatform,
   isSafariOnIOS,
+  isLibraryPath,
+  isManualInstallModalOpen,
+  closeManualInstallModal,
   hasDeferredInstallPrompt,
   triggerNativeInstallPrompt,
   dismissInstallPrompt
 } from '../services/pwaService';
 
-export const PWAInstallPrompt: React.FC = () => {
+interface PWAInstallPromptProps {
+  mode?: 'studio' | 'library';
+}
+
+export const PWAInstallPrompt: React.FC<PWAInstallPromptProps> = ({ mode }) => {
   const lang = getActiveLanguage();
-  const [visible, setVisible] = useState<boolean>(() => shouldShowInstallInvitation());
+  const isLibrary = mode ? mode === 'library' : isLibraryPath();
+  const [visible, setVisible] = useState<boolean>(() =>
+    shouldShowInstallInvitation({ isLibrary })
+  );
   const [platform, setPlatform] = useState(() => detectMobilePlatform());
-  const [hasNativePrompt, setHasNativePrompt] = useState<boolean>(() => hasDeferredInstallPrompt());
+  const [hasNativePrompt, setHasNativePrompt] = useState<boolean>(() =>
+    hasDeferredInstallPrompt()
+  );
+  const [isManualOpen, setIsManualOpen] = useState<boolean>(() =>
+    isManualInstallModalOpen()
+  );
   const [showAndroidManual, setShowAndroidManual] = useState<boolean>(false);
   const [iconError, setIconError] = useState<boolean>(false);
 
   useEffect(() => {
     initPWAService();
     const syncState = () => {
-      setVisible(shouldShowInstallInvitation());
+      const libMode = mode ? mode === 'library' : isLibraryPath();
+      setVisible(shouldShowInstallInvitation({ isLibrary: libMode }));
       setPlatform(detectMobilePlatform());
       setHasNativePrompt(hasDeferredInstallPrompt());
+      setIsManualOpen(isManualInstallModalOpen());
     };
     syncState();
 
@@ -35,13 +52,16 @@ export const PWAInstallPrompt: React.FC = () => {
       unsubscribe();
       window.removeEventListener('resize', syncState);
     };
-  }, []);
+  }, [mode]);
 
   if (!visible) {
     return null;
   }
 
-  const appTitle = `${lang.name} Community Teachers`;
+  const appTitle = isLibrary
+    ? `${lang.name} Community Library`
+    : `${lang.name} Community Teachers`;
+  const installBtnLabel = isLibrary ? 'Install Library' : 'Install App';
   const baseUrl = (import.meta as any)?.env?.BASE_URL || '/';
   const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   const iconSrc = `${cleanBase}assets/${lang.id}-icon-192.png`;
@@ -51,7 +71,9 @@ export const PWAInstallPrompt: React.FC = () => {
     : 'bg-[#157A4C] hover:bg-[#11643E]';
 
   const handleDismiss = () => {
-    dismissInstallPrompt(lang.storagePrefix);
+    closeManualInstallModal();
+    dismissInstallPrompt(lang.storagePrefix, Date.now(), isLibrary);
+    setShowAndroidManual(false);
     setVisible(false);
   };
 
@@ -59,6 +81,7 @@ export const PWAInstallPrompt: React.FC = () => {
     if (hasDeferredInstallPrompt()) {
       const outcome = await triggerNativeInstallPrompt(lang.storagePrefix);
       if (outcome === 'accepted' || outcome === 'dismissed') {
+        closeManualInstallModal();
         setVisible(false);
         return;
       }
@@ -73,7 +96,7 @@ export const PWAInstallPrompt: React.FC = () => {
     <div
       role="dialog"
       aria-label={`Install ${appTitle}`}
-      className="fixed inset-x-0 bottom-0 z-40 px-3.5 pt-2 pointer-events-none"
+      className="fixed inset-x-0 bottom-0 z-50 px-3.5 pt-2 pointer-events-none"
       style={{
         paddingBottom: 'max(0.875rem, env(safe-area-inset-bottom, 0.875rem))'
       }}
@@ -103,6 +126,8 @@ export const PWAInstallPrompt: React.FC = () => {
               <p className="text-[12px] text-[#465249] font-medium leading-tight mt-0.5">
                 {isIOS
                   ? 'Add to your iPhone Home Screen in Safari'
+                  : isLibrary
+                  ? 'Open the Library directly from your Home Screen'
                   : 'Open full-screen from your Home Screen'}
               </p>
             </div>
@@ -156,7 +181,7 @@ export const PWAInstallPrompt: React.FC = () => {
           </div>
         ) : (
           <div className="mt-2.5 flex flex-col gap-2">
-            {(showAndroidManual || !hasNativePrompt) && (
+            {(showAndroidManual || isManualOpen || !hasNativePrompt) && (
               <div className="rounded-xl bg-white border border-[#E2D8C6] px-2.5 py-2 text-left text-[12px] text-[#263129] leading-snug">
                 Tap your browser menu <strong>(⋮)</strong> and choose{' '}
                 <strong>Install app</strong> or <strong>Add to Home screen</strong>.
@@ -169,7 +194,7 @@ export const PWAInstallPrompt: React.FC = () => {
                 className={`flex-1 min-h-[40px] py-2 px-3.5 rounded-xl ${primaryBtnClass} active:scale-[0.99] text-white font-bold text-[13.5px] shadow-xs flex items-center justify-center gap-2 transition`}
               >
                 <Download className="w-4 h-4 stroke-[2.3]" />
-                <span>Install App</span>
+                <span>{installBtnLabel}</span>
               </button>
               <button
                 type="button"
@@ -185,4 +210,3 @@ export const PWAInstallPrompt: React.FC = () => {
     </div>
   );
 };
-
