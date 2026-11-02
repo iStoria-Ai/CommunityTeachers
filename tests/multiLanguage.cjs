@@ -792,6 +792,259 @@ assert.ok(adminDelBody.includes('deleteInFlightRef.current'), 'handleAdminDelete
 assert.ok(adminDelBody.includes('if (res.ok)') && adminDelBody.indexOf('setConfirmedDeletedIds') > adminDelBody.indexOf('if (res.ok)'), 'Lesson must only be removed after backend confirms res.ok');
 console.log('✓ Direct deletion without extra confirmation popup and backend-confirmed removal verified.');
 
+// --- Test 11: Automatic Image Resizing & Compression (3 MB, 5 MB, 10 MB, 15 MB, HEIC & Gateway Upload) ---
+console.log('--- Test 11: Automatic Image Resizing & Compression (3 MB, 5 MB, 10 MB, 15 MB, HEIC & Gateway Upload) ---');
+{
+  const imgCompressionBundle = buildSync({
+    stdin: {
+      contents: `export * from './src/services/imageCompressionService';`,
+      resolveDir: path.join(__dirname, '..'),
+      loader: 'ts'
+    },
+    bundle: true,
+    write: false,
+    platform: 'node',
+    format: 'cjs'
+  }).outputFiles[0].text;
+
+  const imgMod = { exports: {} };
+  vm.runInNewContext(imgCompressionBundle, {
+    module: imgMod,
+    exports: imgMod.exports,
+    console,
+    Buffer,
+    Blob
+  });
+
+  const {
+    TARGET_MAX_IMAGE_BYTES,
+    BACKEND_MAX_IMAGE_BYTES,
+    SAFE_COMPRESSED_MAX_BYTES,
+    isSupportedImageFile,
+    isHeicImageFile,
+    calculateScaledDimensions,
+    getDataUrlByteSize,
+    detectDataUrlBackendMime,
+    prepareImageForUpload
+  } = imgMod.exports;
+
+  assert.equal(TARGET_MAX_IMAGE_BYTES, Math.floor(1.5 * 1024 * 1024), 'Target max image size must be 1.5 MB');
+  assert.equal(BACKEND_MAX_IMAGE_BYTES, 2 * 1024 * 1024, 'Backend limit remains 2 MB');
+
+  // 11a: Verify supported image formats (JPG, PNG, WebP, iPhone HEIC/HEIF)
+  assert.equal(isSupportedImageFile({ name: 'photo.jpg', type: 'image/jpeg' }), true);
+  assert.equal(isSupportedImageFile({ name: 'illustration.png', type: 'image/png' }), true);
+  assert.equal(isSupportedImageFile({ name: 'card.webp', type: 'image/webp' }), true);
+  assert.equal(isSupportedImageFile({ name: 'IMG_4821.HEIC', type: 'image/heic' }), true);
+  assert.equal(isSupportedImageFile({ name: 'IMG_4822.heif', type: '' }), true);
+  assert.equal(isHeicImageFile({ name: 'IMG_4821.HEIC', type: 'image/heic' }), true);
+  assert.equal(isSupportedImageFile({ name: 'document.pdf', type: 'application/pdf' }), false);
+
+  // 11b: Verify aspect ratio preservation without cropping or distortion
+  const ratio4x3 = calculateScaledDimensions(4032, 3024, 2048);
+  assert.equal(ratio4x3.width, 2048);
+  assert.equal(ratio4x3.height, 1536);
+  assert.ok(Math.abs(ratio4x3.width / ratio4x3.height - 4032 / 3024) < 0.001, '4:3 aspect ratio strictly preserved');
+
+  const ratio16x9 = calculateScaledDimensions(3840, 2160, 1600);
+  assert.equal(ratio16x9.width, 1600);
+  assert.equal(ratio16x9.height, 900);
+  assert.ok(Math.abs(ratio16x9.width / ratio16x9.height - 16 / 9) < 0.001, '16:9 aspect ratio strictly preserved');
+
+  const ratioPortrait = calculateScaledDimensions(3024, 4032, 1280);
+  assert.equal(ratioPortrait.width, 960);
+  assert.equal(ratioPortrait.height, 1280);
+  assert.ok(Math.abs(ratioPortrait.width / ratioPortrait.height - 3024 / 4032) < 0.001, 'Portrait aspect ratio strictly preserved');
+
+  const noUpscale = calculateScaledDimensions(800, 600, 2048);
+  assert.equal(noUpscale.width, 800);
+  assert.equal(noUpscale.height, 600, 'Images smaller than maxDimension are never upscaled');
+
+  // Helper to create realistic mock image buffers with valid JPEG/PNG/WebP/HEIC headers
+  function makeMockImageBuffer(byteSize, format = 'jpeg') {
+    const buf = Buffer.alloc(byteSize, 0x42);
+    if (format === 'jpeg') {
+      buf[0] = 0xff; buf[1] = 0xd8; buf[2] = 0xff; buf[3] = 0xe0;
+    } else if (format === 'png') {
+      buf[0] = 0x89; buf[1] = 0x50; buf[2] = 0x4e; buf[3] = 0x47;
+    } else if (format === 'webp') {
+      buf.write('RIFF', 0, 'ascii');
+      buf.write('WEBP', 8, 'ascii');
+    } else if (format === 'heic') {
+      buf.write('ftypheic', 4, 'ascii');
+    }
+    return buf;
+  }
+
+  function createSimulatedBrowserRuntime(origWidth, origHeight, complexityFactor = 1.0) {
+    return {
+      readFileAsDataUrl: async (file) => {
+        const b64 = file._buffer.toString('base64');
+        return `data:${file.type || 'image/jpeg'};base64,${b64}`;
+      },
+      decodeImage: async (file) => {
+        if (file._corrupted) throw new Error('Decode failed');
+        return {
+          width: origWidth,
+          height: origHeight,
+          drawToCanvas: () => {}
+        };
+      },
+      encodeCanvas: async (_source, width, height, mimeType, quality) => {
+        // Simulate realistic JPEG encoder output byte size proportional to pixel count, quality, and complexity
+        const pixels = width * height;
+        const simulatedBytes = Math.max(
+          1024,
+          Math.round(pixels * 0.48 * Math.pow(quality, 2.1) * complexityFactor)
+        );
+        const jpegBuf = makeMockImageBuffer(simulatedBytes, 'jpeg');
+        return `data:${mimeType};base64,${jpegBuf.toString('base64')}`;
+      }
+    };
+  }
+
+  (async () => {
+    // 11c: Small image (<= 1.5 MB, e.g. 500 KB JPEG) is NOT recompressed and keeps exact bytes
+    const smallBuf = makeMockImageBuffer(500 * 1024, 'jpeg');
+    const smallFile = {
+      name: 'small.jpg',
+      type: 'image/jpeg',
+      size: smallBuf.length,
+      _buffer: Buffer.from(smallBuf)
+    };
+    const smallRes = await prepareImageForUpload(smallFile, createSimulatedBrowserRuntime(1200, 900));
+    assert.equal(smallRes.wasCompressed, false, 'Image <= 1.5 MB must not be unnecessarily recompressed');
+    assert.equal(smallRes.finalBytes, 500 * 1024, 'Small image preserves exact byte size');
+
+    // 11d: Test 3 MB, 5 MB, 10 MB, and 15 MB images across JPEG, PNG, WebP, and iPhone HEIC
+    const testCases = [
+      { label: '3 MB JPEG (Android/Desktop)', sizeMB: 3, format: 'jpeg', mime: 'image/jpeg', name: 'photo_3mb.jpg', w: 3264, h: 2448, complexity: 1.1 },
+      { label: '5 MB PNG (Desktop High-Res)', sizeMB: 5, format: 'png', mime: 'image/png', name: 'graphic_5mb.png', w: 3840, h: 2160, complexity: 1.3 },
+      { label: '10 MB HEIC (iPhone Safari 12MP)', sizeMB: 10, format: 'heic', mime: 'image/heic', name: 'IMG_9012.HEIC', w: 4032, h: 3024, complexity: 1.6 },
+      { label: '15 MB JPEG (iPhone/Android 48MP)', sizeMB: 15, format: 'jpeg', mime: 'image/jpeg', name: 'camera_15mb.jpg', w: 8064, h: 6048, complexity: 2.2 }
+    ];
+
+    const edoLessonForImg = edoGw.post({
+      action: 'upload_recording',
+      lessonId: 'edo-img-test',
+      recordingId: 'rec-edo-img-test',
+      english: 'Elephant',
+      edoText: 'Eni',
+      audioBase64: dummyAudio,
+      mimeType: 'audio/wav'
+    });
+    const urhLessonForImg = urhGw.post({
+      action: 'upload_recording',
+      lessonId: 'urh-img-test',
+      recordingId: 'rec-urh-img-test',
+      english: 'Elephant',
+      spelling: 'Eni',
+      audioBase64: dummyAudio,
+      mimeType: 'audio/wav'
+    });
+    assert.equal(edoLessonForImg.status, 'success');
+    assert.equal(urhLessonForImg.status, 'success');
+
+    for (const tc of testCases) {
+      const byteSize = tc.sizeMB * 1024 * 1024;
+      const origBuf = makeMockImageBuffer(byteSize, tc.format);
+      const origSnapshot = Buffer.from(origBuf);
+      const fileObj = {
+        name: tc.name,
+        type: tc.mime,
+        size: origBuf.length,
+        _buffer: origBuf
+      };
+
+      const prepared = await prepareImageForUpload(
+        fileObj,
+        createSimulatedBrowserRuntime(tc.w, tc.h, tc.complexity)
+      );
+
+      // Verify compressed image is strictly below 1.5 MB and fits within 2 MB backend limit including base64
+      assert.equal(prepared.wasCompressed, true, `${tc.label} must be automatically compressed`);
+      assert.ok(
+        prepared.finalBytes <= SAFE_COMPRESSED_MAX_BYTES && prepared.finalBytes < TARGET_MAX_IMAGE_BYTES,
+        `${tc.label} compressed binary (${prepared.finalBytes} bytes) must fit below 1.5 MB (${TARGET_MAX_IMAGE_BYTES} bytes)`
+      );
+      assert.ok(
+        prepared.dataUrl.length < BACKEND_MAX_IMAGE_BYTES,
+        `${tc.label} base64 payload (${prepared.dataUrl.length} chars) must fit below 2 MB backend limit`
+      );
+      assert.equal(detectDataUrlBackendMime(prepared.dataUrl), 'image/jpeg', `${tc.label} outputs valid JPEG magic bytes`);
+
+      // Verify aspect ratio is preserved without distortion
+      const origRatio = tc.w / tc.h;
+      const newRatio = prepared.width / prepared.height;
+      assert.ok(Math.abs(origRatio - newRatio) < 0.002, `${tc.label} must preserve original aspect ratio`);
+
+      // Requirement 10: Original file on user's phone/device remains 100% unchanged
+      assert.equal(fileObj.size, byteSize, `${tc.label} original file size must remain unchanged`);
+      assert.equal(fileObj.name, tc.name, `${tc.label} original file name must remain unchanged`);
+      assert.equal(Buffer.compare(fileObj._buffer, origSnapshot), 0, `${tc.label} original file bytes must remain untouched`);
+
+      // Requirement 11 & 13: Verify unchanged Edo and Urhobo Google Apps Script gateways accept the compressed image
+      const edoUploadRes = edoGw.post({
+        action: 'admin_upload_lesson_image',
+        approvalCode: '123456',
+        metadataFileId: edoLessonForImg.metadataFileId,
+        imageBase64: prepared.dataUrl,
+        english: 'Elephant'
+      });
+      assert.equal(edoUploadRes.status, 'success', `Edo gateway must accept compressed ${tc.label}`);
+      assert.ok(edoUploadRes.imageUrl && edoUploadRes.imageUrl.includes('drive.google.com/thumbnail?id='), 'Edo gateway returns public thumbnail URL');
+
+      const urhUploadRes = urhGw.post({
+        action: 'admin_upload_lesson_image',
+        approvalCode: '654321',
+        metadataFileId: urhLessonForImg.metadataFileId,
+        imageBase64: prepared.dataUrl,
+        english: 'Elephant'
+      });
+      assert.equal(urhUploadRes.status, 'success', `Urhobo gateway must accept compressed ${tc.label}`);
+      assert.ok(urhUploadRes.imageUrl && urhUploadRes.imageUrl.includes('drive.google.com/thumbnail?id='), 'Urhobo gateway returns public thumbnail URL');
+    }
+
+    // 11e: Verify clear error message when an image is corrupted or cannot be reduced below 1.5 MB
+    const corruptedFile = {
+      name: 'corrupt.jpg',
+      type: 'image/jpeg',
+      size: 4 * 1024 * 1024,
+      _corrupted: true
+    };
+    await assert.rejects(
+      () => prepareImageForUpload(corruptedFile, createSimulatedBrowserRuntime(2000, 1500)),
+      /Unable to process this image/
+    );
+
+    const irreducibleRuntime = {
+      ...createSimulatedBrowserRuntime(4000, 3000),
+      encodeCanvas: async () => {
+        const huge = makeMockImageBuffer(1.8 * 1024 * 1024, 'jpeg');
+        return `data:image/jpeg;base64,${huge.toString('base64')}`;
+      }
+    };
+    await assert.rejects(
+      () =>
+        prepareImageForUpload(
+          { name: 'uncompressible.jpg', type: 'image/jpeg', size: 8 * 1024 * 1024, _buffer: Buffer.alloc(16) },
+          irreducibleRuntime
+        ),
+      /Unable to reduce this image below the 1\.5 MB limit/
+    );
+
+    // 11f: Verify LanguageLibraryScreen.tsx shows "Preparing image" and automatically continues to adminUploadLessonImage
+    assert.ok(libScreenSource.includes('Preparing image'), 'LanguageLibraryScreen must display "Preparing image" status while processing');
+    assert.ok(
+      libScreenSource.includes('const prepared = await prepareImageForUpload(file)') &&
+        libScreenSource.includes('await adminUploadLessonImage(\n        selectedEntry.cloudMetadataFileId,\n        prepared.dataUrl,'),
+      'LanguageLibraryScreen must automatically continue from prepareImageForUpload into adminUploadLessonImage without re-selecting'
+    );
+
+    console.log('✓ Automatic image resizing & compression (3 MB, 5 MB, 10 MB, 15 MB, HEIC, aspect ratio, and gateway upload) verified.');
+  })();
+}
+
 // Reset to Edo at end
 api.setActiveLanguage('edo');
 console.log('\n=== ALL MULTI-LANGUAGE ARCHITECTURE TESTS PASSED ===\n');

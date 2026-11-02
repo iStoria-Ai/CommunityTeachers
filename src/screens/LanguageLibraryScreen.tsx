@@ -48,6 +48,10 @@ import {
   syncSharedImageIndex,
   registerUploadedImage
 } from '../services/imageService';
+import {
+  prepareImageForUpload,
+  isSupportedImageFile
+} from '../services/imageCompressionService';
 
 export interface LanguageLibraryScreenProps {
   entries: EdoEntry[];
@@ -251,6 +255,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   const [isApprovalCodeVerified, setIsApprovalCodeVerified] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [imagePreparing, setImagePreparing] = useState(false);
   const [imageUploadBusy, setImageUploadBusy] = useState(false);
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const [imageUploadSuccess, setImageUploadSuccess] = useState<string | null>(null);
@@ -381,6 +386,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     setIsApprovalCodeVerified(false);
     setVerifyBusy(false);
     setVerifyError(null);
+    setImagePreparing(false);
     setImageUploadBusy(false);
     setImageUploadError(null);
     setImageUploadSuccess(null);
@@ -397,6 +403,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     setIsApprovalCodeVerified(false);
     setVerifyBusy(false);
     setVerifyError(null);
+    setImagePreparing(false);
     setImageUploadBusy(false);
     setImageUploadError(null);
     setImageUploadSuccess(null);
@@ -972,28 +979,21 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     setImageUploadError(null);
     setImageUploadSuccess(null);
 
-    if (!file.type.startsWith('image/')) {
-      setImageUploadError('Please select a valid JPEG, PNG or WebP image.');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageUploadError('Image size exceeds 5 MB limit.');
+    if (!isSupportedImageFile(file)) {
+      setImageUploadError('Please select a valid JPG, PNG, WebP or iPhone HEIC image.');
       return;
     }
 
+    setImagePreparing(true);
     setImageUploadBusy(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const prepared = await prepareImageForUpload(file);
+      setImagePreparing(false);
 
       const credential = adminMode === 'code' ? approvalCodeInput.trim() : (adminTokenInput.trim() || approvalCodeInput.trim());
       const res = await adminUploadLessonImage(
         selectedEntry.cloudMetadataFileId,
-        dataUrl,
+        prepared.dataUrl,
         credential,
         selectedEntry.english
       );
@@ -1009,9 +1009,44 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     } catch (err: any) {
       setImageUploadError(String(err?.message || err));
     } finally {
+      setImagePreparing(false);
       setImageUploadBusy(false);
     }
   };
+
+  const renderLessonImageUploadSection = () => (
+    <div className="pt-2 border-t border-[#EAE3D2] flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-bold text-[#1A241D]">Lesson Image</span>
+        <button
+          type="button"
+          disabled={imageUploadBusy}
+          onClick={() => imageInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-xs transition disabled:opacity-50 shadow-2xs"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span>
+            {imagePreparing
+              ? 'Preparing image…'
+              : imageUploadBusy
+              ? 'Uploading to Drive…'
+              : 'Upload Image'}
+          </span>
+        </button>
+      </div>
+      <p className="text-[10px] text-[#556058]">
+        Select an image from your phone or computer to replace the lesson image in Google Drive.
+      </p>
+      {imagePreparing && (
+        <p role="status" className="text-[11px] text-[#157A4C] font-semibold flex items-center gap-1.5">
+          <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+          <span>Preparing image…</span>
+        </p>
+      )}
+      {imageUploadError && <p className="text-[11px] text-red-600 font-semibold">{imageUploadError}</p>}
+      {imageUploadSuccess && <p className="text-[11px] text-[#157A4C] font-semibold">{imageUploadSuccess}</p>}
+    </div>
+  );
 
   return (
     <div className="edo-screen relative">
@@ -1498,19 +1533,40 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                           <label htmlFor="admin-unlock-code" className="block text-[11px] font-bold text-[#1A241D]">
                             Trusted 6-Digit Approval Number
                           </label>
-                          <input
-                            id="admin-unlock-code"
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={6}
-                            value={approvalCodeInput}
-                            onChange={(e) => {
-                              setApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6));
-                              setAdminDeleteError(null);
-                            }}
-                            placeholder="6-digit number"
-                            className="w-full py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
-                          />
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              id="admin-unlock-code"
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={6}
+                              value={approvalCodeInput}
+                              onChange={(e) => {
+                                setApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6));
+                                setIsApprovalCodeVerified(false);
+                                setVerifyError(null);
+                                setImageUploadError(null);
+                                setImageUploadSuccess(null);
+                                setAdminDeleteError(null);
+                              }}
+                              placeholder="6-digit number"
+                              className="flex-1 py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
+                            />
+                            {!isApprovalCodeVerified ? (
+                              <button
+                                type="button"
+                                disabled={verifyBusy || approvalCodeInput.trim().length !== 6}
+                                onClick={handleVerifyApprovalCode}
+                                className="py-1.5 px-3 rounded-xl bg-[#3A453D] hover:bg-[#1C241E] text-white font-bold text-xs shrink-0 disabled:opacity-50"
+                              >
+                                {verifyBusy ? 'Verifying…' : 'Verify'}
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#157A4C] bg-[#E8F5E9] border border-[#A5D6A7] px-2.5 py-1 rounded-lg shrink-0">
+                                ✓ Verified
+                              </span>
+                            )}
+                          </div>
+                          {verifyError && <p className="text-[11px] text-red-600 font-semibold">{verifyError}</p>}
                           {adminDeleteError && <p className="text-[11px] text-red-600 font-semibold">{adminDeleteError}</p>}
                           <button
                             type="button"
@@ -1520,6 +1576,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                           >
                             {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
                           </button>
+                          {isApprovalCodeVerified && renderLessonImageUploadSection()}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -1575,6 +1632,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                               {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
                             </button>
                           </div>
+                          {adminTokenInput.trim().length > 0 && renderLessonImageUploadSection()}
                         </div>
                       )}
                     </div>
@@ -1827,34 +1885,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                             </div>
 
                             {/* Only after successful verification should the Upload Image button become available */}
-                            {isApprovalCodeVerified && (
-                              <div className="pt-2 border-t border-[#EAE3D2] flex flex-col gap-1.5">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[11px] font-bold text-[#1A241D]">Lesson Image</span>
-                                  <button
-                                    type="button"
-                                    disabled={imageUploadBusy}
-                                    onClick={() => imageInputRef.current?.click()}
-                                    className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-xs transition disabled:opacity-50 shadow-2xs"
-                                  >
-                                    <Upload className="w-3.5 h-3.5" />
-                                    <span>{imageUploadBusy ? 'Uploading to Drive…' : 'Upload Image'}</span>
-                                  </button>
-                                  <input
-                                    ref={imageInputRef}
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp"
-                                    className="hidden"
-                                    onChange={handleImageFileSelect}
-                                  />
-                                </div>
-                                <p className="text-[10px] text-[#556058]">
-                                  Select an image from your phone or computer to replace the lesson image in Google Drive.
-                                </p>
-                                {imageUploadError && <p className="text-[11px] text-red-600 font-semibold">{imageUploadError}</p>}
-                                {imageUploadSuccess && <p className="text-[11px] text-[#157A4C] font-semibold">{imageUploadSuccess}</p>}
-                              </div>
-                            )}
+                            {isApprovalCodeVerified && renderLessonImageUploadSection()}
                           </div>
                         ) : (
                           <div className="space-y-1.5">
@@ -1907,6 +1938,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                                 {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
                               </button>
                             </div>
+                            {adminTokenInput.trim().length > 0 && renderLessonImageUploadSection()}
                           </div>
                         )}
                       </div>
@@ -1915,6 +1947,13 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                 )}
               </div>
             )}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+              className="hidden"
+              onChange={handleImageFileSelect}
+            />
           </div>
         </div>
       )}
