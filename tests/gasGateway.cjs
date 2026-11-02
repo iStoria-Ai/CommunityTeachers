@@ -1,5 +1,5 @@
 /**
- * Comprehensive Test Harness for Edo Language Studio Google Apps Script (gas/Code.gs)
+ * Comprehensive Test Harness for Edo Language Studio Google Apps Script (gas/edo/Code.gs)
  *
  * Mocks the Google Apps Script environment:
  * - DriveApp (Folders, Files, FileIterator, Parent relationships)
@@ -29,7 +29,7 @@ function createMockDrive() {
       getDataAsString: () => buffer.toString('utf8'),
       getContentType: () => mimeType || 'application/octet-stream',
       getName: () => name || 'blob',
-      setName: function(n) { name = n; return this; }
+      setName: function (n) { name = n; return this; }
     };
   }
 
@@ -53,7 +53,12 @@ function createMockDrive() {
       setTrashed: (t) => {
         file.trashed = Boolean(t);
       },
-      setSharing: () => {},
+      sharingAccess: null,
+      sharingPermission: null,
+      setSharing: (acc, perm) => {
+        file.sharingAccess = acc;
+        file.sharingPermission = perm;
+      },
       getMimeType: () => file.mimeType || 'application/octet-stream',
       getParents: () => {
         let done = false;
@@ -147,7 +152,7 @@ function createMockDrive() {
 }
 
 function runTests() {
-  console.log('=== Running Automated Tests on gas/Code.gs ===\n');
+  console.log('=== Running Automated Tests on gas/edo/Code.gs ===\n');
 
   const { driveApp, files, makeBlob } = createMockDrive();
 
@@ -212,7 +217,7 @@ function runTests() {
     MimeType: { JSON: 'application/json' },
     createTextOutput: (content) => ({
       mimeType: null,
-      setMimeType: function(m) { this.mimeType = m; return this; },
+      setMimeType: function (m) { this.mimeType = m; return this; },
       getContent: () => content
     })
   };
@@ -227,7 +232,7 @@ function runTests() {
   };
 
   // Setup VM sandbox with Code.gs code
-  const codeGsSource = fs.readFileSync(path.join(__dirname, '../gas/Code.gs'), 'utf8');
+  const codeGsSource = fs.readFileSync(path.join(__dirname, '../gas/edo/Code.gs'), 'utf8');
   const JPEG_BYTES = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(300, 7)]);
   const fetchCalls = [];
   const fetchResponses = new Map(); // url -> { code, bytes }
@@ -253,7 +258,7 @@ function runTests() {
     HtmlService: {
       createHtmlOutput: (html) => ({
         getContent: () => html,
-        setTitle: function() { return this; }
+        setTitle: function () { return this; }
       })
     },
     Logger: logger,
@@ -361,11 +366,13 @@ function runTests() {
   // 7. Community Spelling Submission (Person B writes Edo text)
   console.log('--- Step 7: Testing Person B Spelling Submission ---');
   const submitSpellingRes = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'submit_spelling',
-      metadataFileId: needsSpellingRes.metadataFileId,
-      edoSpelling: 'Evbare'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'submit_spelling',
+        metadataFileId: needsSpellingRes.metadataFileId,
+        edoSpelling: 'Evbare'
+      })
+    }
   }).getContent());
   assert.equal(submitSpellingRes.status, 'spelling_submitted');
   assert.equal(submitSpellingRes.edoSpelling, 'Evbare');
@@ -380,11 +387,13 @@ function runTests() {
   // 8. Concurrency Protection (Prevent double submission)
   console.log('--- Step 8: Testing Concurrency Protection ---');
   const conflictRes = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'submit_spelling',
-      metadataFileId: needsSpellingRes.metadataFileId,
-      edoSpelling: 'Evbare Duplicate'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'submit_spelling',
+        metadataFileId: needsSpellingRes.metadataFileId,
+        edoSpelling: 'Evbare Duplicate'
+      })
+    }
   }).getContent());
   assert.equal(conflictRes.code, 'SPELLING_ALREADY_SUBMITTED');
   console.log('✓ Second spelling submission safely rejected with SPELLING_ALREADY_SUBMITTED.');
@@ -436,17 +445,19 @@ function runTests() {
   console.log('--- Step 8b: Testing Replacement Voice & Drive Cleanup ---');
   // 1. Initial lesson with recording
   const replaceUpload = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-replacetest',
-      recordingId: 'rec-replace-001',
-      english: 'Door',
-      edoText: 'Ukhegbe',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 3
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-replacetest',
+        recordingId: 'rec-replace-001',
+        english: 'Door',
+        edoText: 'Ukhegbe',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 3
+      })
+    }
   }).getContent());
   assert.equal(replaceUpload.status, 'success');
   const oldAudioId = replaceUpload.audioFileId;
@@ -455,17 +466,19 @@ function runTests() {
 
   // Another contributor's unrelated recording
   const otherUpload = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-othertest',
-      recordingId: 'rec-other-001',
-      english: 'Window',
-      edoText: 'Owindo',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 3
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-othertest',
+        recordingId: 'rec-other-001',
+        english: 'Window',
+        edoText: 'Owindo',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 3
+      })
+    }
   }).getContent());
   assert.equal(otherUpload.status, 'success');
   const otherAudioId = otherUpload.audioFileId;
@@ -473,13 +486,15 @@ function runTests() {
 
   // 2. Failed upload test: invalid audio must NOT delete the old working recording
   const failedReplacement = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: replaceMetaId,
-      expectedVersion: 0,
-      audioBase64: 'short', // invalid size
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: replaceMetaId,
+        expectedVersion: 0,
+        audioBase64: 'short', // invalid size
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(failedReplacement.status, 'error');
   assert.equal(driveApp.getFileById(oldAudioId).isTrashed(), false, 'Failed replacement preserves existing recording');
@@ -487,16 +502,18 @@ function runTests() {
   // 3. Successful replacement voice upload
   const replacementWavB64 = Buffer.from('RIFF....WAVEfmt ....data....replacement-audio').toString('base64');
   const replaceRes = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: replaceMetaId,
-      expectedVersion: 0,
-      mutationId: 'replace-mutation-001',
-      audioBase64: replacementWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 2,
-      permissions: { playback: 'granted', aiVoiceTraining: 'denied' }
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: replaceMetaId,
+        expectedVersion: 0,
+        mutationId: 'replace-mutation-001',
+        audioBase64: replacementWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 2,
+        permissions: { playback: 'granted', aiVoiceTraining: 'denied' }
+      })
+    }
   }).getContent());
   assert.equal(replaceRes.status, 'success');
   assert.equal(replaceRes.verified, true);
@@ -534,16 +551,18 @@ function runTests() {
   // 5b. Verify successive voice replacement (v1 -> v2) also trashes v1 and preserves exactly 1 active audio file
   const replacementWavB64v2 = Buffer.from('RIFF....WAVEfmt ....data....replacement-audio-v2').toString('base64');
   const replaceRes2 = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: replaceMetaId,
-      expectedVersion: 1,
-      mutationId: 'replace-mutation-002',
-      audioBase64: replacementWavB64v2,
-      mimeType: 'audio/wav',
-      durationSec: 2,
-      permissions: { playback: 'granted', aiVoiceTraining: 'denied' }
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: replaceMetaId,
+        expectedVersion: 1,
+        mutationId: 'replace-mutation-002',
+        audioBase64: replacementWavB64v2,
+        mimeType: 'audio/wav',
+        durationSec: 2,
+        permissions: { playback: 'granted', aiVoiceTraining: 'denied' }
+      })
+    }
   }).getContent());
   assert.equal(replaceRes2.status, 'success');
   const v2AudioId = replaceRes2.audioFileId;
@@ -599,14 +618,16 @@ function runTests() {
   assert.equal(totalLessonFilesAfterLock.length, 2, 'Lesson still maintains strictly two files after approval and locking');
 
   const lockedReplaceAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: replaceMetaId,
-      expectedVersion: 2,
-      audioBase64: replacementWavB64,
-      mimeType: 'audio/wav',
-      permissions: { playback: 'granted' }
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: replaceMetaId,
+        expectedVersion: 2,
+        audioBase64: replacementWavB64,
+        mimeType: 'audio/wav',
+        permissions: { playback: 'granted' }
+      })
+    }
   }).getContent());
   assert.equal(lockedReplaceAttempt.code, 'ENTRY_LOCKED', 'Ordinary users must not replace locked recordings');
   assert.equal(driveApp.getFileById(v2AudioId).isTrashed(), false, 'Approved audio is preserved');
@@ -623,17 +644,19 @@ function runTests() {
 
   // 1. Teach Edo: Contributor records voice without spelling
   const teachEdoVoiceOnly = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'move-stand-test',
-      recordingId: 'rec-stand-001',
-      english: 'Stand',
-      edoText: '',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 2
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'move-stand-test',
+        recordingId: 'rec-stand-001',
+        english: 'Stand',
+        edoText: '',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 2
+      })
+    }
   }).getContent());
   assert.equal(teachEdoVoiceOnly.status, 'success');
   assert.equal(teachEdoVoiceOnly.recordingStatus, 'needs_spelling');
@@ -649,17 +672,19 @@ function runTests() {
   // 2. Teach Edo: User later writes Edo spelling for Stand ("Otẹ") and submits
   // Gateway MUST update the existing metadata file and NOT create another audio file!
   const teachEdoSpellingLater = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'move-stand-test',
-      recordingId: 'rec-stand-002', // different recording ID from later step
-      english: 'Stand',
-      edoText: 'Otẹ',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 2
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'move-stand-test',
+        recordingId: 'rec-stand-002', // different recording ID from later step
+        english: 'Stand',
+        edoText: 'Otẹ',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 2
+      })
+    }
   }).getContent());
   assert.equal(teachEdoSpellingLater.status, 'success');
   assert.equal(teachEdoSpellingLater.duplicate, true);
@@ -679,17 +704,19 @@ function runTests() {
 
   // 3. Help Others: Contributor submits spelling for another voice-only entry via update_contribution
   const helpOthersItem = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-jump-test',
-      recordingId: 'rec-jump-001',
-      english: 'Jump',
-      edoText: '',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav',
-      durationSec: 2
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-jump-test',
+        recordingId: 'rec-jump-001',
+        english: 'Jump',
+        edoText: '',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav',
+        durationSec: 2
+      })
+    }
   }).getContent());
   assert.equal(helpOthersItem.status, 'success');
   const jumpAudioId = helpOthersItem.audioFileId;
@@ -697,13 +724,15 @@ function runTests() {
 
   // Help Others writes spelling via update_contribution (NO audioBase64 in payload)
   const helpOthersSave = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: jumpMetaId,
-      expectedVersion: 0,
-      mutationId: 'help-others-jump-001',
-      edoText: 'Gbe'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: jumpMetaId,
+        expectedVersion: 0,
+        mutationId: 'help-others-jump-001',
+        edoText: 'Gbe'
+      })
+    }
   }).getContent());
   assert.equal(helpOthersSave.status, 'success');
   assert.equal(helpOthersSave.audioFileId, jumpAudioId, 'Audio file ID preserved');
@@ -716,13 +745,15 @@ function runTests() {
 
   // 4. Failed upload safety: corrupted audio payload must fail safely without altering existing files
   const failedUpload = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'update_contribution',
-      metadataFileId: jumpMetaId,
-      expectedVersion: 1,
-      audioBase64: 'bad-short-string',
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'update_contribution',
+        metadataFileId: jumpMetaId,
+        expectedVersion: 1,
+        audioBase64: 'bad-short-string',
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(failedUpload.status, 'error');
   assert.equal(driveApp.getFileById(jumpAudioId).isTrashed(), false, 'Existing valid audio retained on failed upload');
@@ -772,15 +803,17 @@ function runTests() {
   cacheStore.set('rate_community_uploads_' + currentWindow, '30'); // Quota reached
 
   const rateLimitedRes = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-spam',
-      recordingId: 'rec-spam-001',
-      english: 'Spam',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-spam',
+        recordingId: 'rec-spam-001',
+        english: 'Spam',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(rateLimitedRes.code, 'RATE_LIMIT_EXCEEDED');
   console.log('✓ Abuse protection triggered: 31st upload rejected with RATE_LIMIT_EXCEEDED.');
@@ -788,15 +821,17 @@ function runTests() {
   // 10. Privileged/Registered token bypasses community rate limit
   console.log('--- Step 10: Testing Registered Token Rate Limit Immunity ---');
   const registeredRes = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: speakerToken, // Registered speaker token
-      lessonId: 'word-privileged',
-      recordingId: 'rec-priv-001',
-      english: 'Privileged',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: speakerToken, // Registered speaker token
+        lessonId: 'word-privileged',
+        recordingId: 'rec-priv-001',
+        english: 'Privileged',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(registeredRes.status, 'success', 'Registered token is not blocked by community rate limit');
   console.log('✓ Registered speaker token successfully bypasses community rate limiter.');
@@ -806,37 +841,43 @@ function runTests() {
   // Reset rate limit key so community test can upload
   cacheStore.delete('rate_community_uploads_' + currentWindow);
   const uploadForLock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-locktest',
-      recordingId: 'rec-lock-001',
-      english: 'Lock Test',
-      edoText: 'Igho',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-locktest',
+        recordingId: 'rec-lock-001',
+        english: 'Lock Test',
+        edoText: 'Igho',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(uploadForLock.status, 'success');
   const targetMetaFileId = uploadForLock.metadataFileId;
 
   // Non-admin attempting to lock must be rejected
   const nonAdminLock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      authToken: speakerToken, // speaker, not admin
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        authToken: speakerToken, // speaker, not admin
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(nonAdminLock.code, 'UNAUTHORIZED_ADMIN');
 
   // Admin locking the entry succeeds
   const adminLock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      authToken: adminToken, // verified admin
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        authToken: adminToken, // verified admin
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(adminLock.status, 'success');
   assert.equal(adminLock.reviewStatus, 'approved_locked');
@@ -845,15 +886,17 @@ function runTests() {
 
   // Verify that subsequent community attempt to modify or overwrite locked entry is rejected with ENTRY_LOCKED
   const lockedUploadAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-locktest',
-      recordingId: 'rec-lock-001',
-      english: 'Lock Test Tampered',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-locktest',
+        recordingId: 'rec-lock-001',
+        english: 'Lock Test Tampered',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(lockedUploadAttempt.code, 'ENTRY_LOCKED');
   const lockedEdit = JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify({ action: 'update_contribution', metadataFileId: targetMetaFileId, expectedVersion: 0, edoText: 'Unauthorized edit' }) } }).getContent());
@@ -862,11 +905,13 @@ function runTests() {
 
   // Admin unlocking the entry succeeds
   const adminUnlock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: adminToken,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: adminToken,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(adminUnlock.status, 'success');
   assert.equal(adminUnlock.reviewStatus, 'pending_approval');
@@ -881,11 +926,13 @@ function runTests() {
 
   // 1. Trusted speaker approval locks the lesson
   const trustedLock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      approvalCode: trustedCode,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        approvalCode: trustedCode,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(trustedLock.status, 'success');
   assert.equal(trustedLock.reviewStatus, 'approved_locked');
@@ -895,51 +942,61 @@ function runTests() {
 
   // 2. Trusted speaker CANNOT unlock the lesson (restricted strictly to owner admin)
   const trustedUnlockAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: trustedCode,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: trustedCode,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(trustedUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
   console.log('✓ Destructive unlock action correctly blocked for trusted approver.');
 
-  // 3. Trusted speaker CANNOT delete the lesson (restricted strictly to owner admin)
-  const trustedDeleteAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_delete_entry',
-      authToken: trustedCode,
-      metadataFileId: targetMetaFileId
-    }) }
+  // 3. Unauthorized deletion attempt without valid credentials correctly rejected
+  const unauthDeleteAttempt = JSON.parse(sandbox.doPost({
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_delete_entry',
+        authToken: 'WrongSecretGuess',
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
-  assert.equal(trustedDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
-  console.log('✓ Destructive delete action correctly blocked for trusted approver.');
+  assert.equal(unauthDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
+  console.log('✓ Unauthorized deletion attempt without valid credentials correctly blocked.');
 
   // 4. Rate-limiting on incorrect approval code guessing attempts
   for (let attempt = 0; attempt < 4; attempt++) {
     const badAttempt = JSON.parse(sandbox.doPost({
-      postData: { contents: JSON.stringify({
-        action: 'admin_lock_entry',
-        approvalCode: 'WrongSecretGuess' + attempt,
-        metadataFileId: targetMetaFileId
-      }) }
+      postData: {
+        contents: JSON.stringify({
+          action: 'admin_lock_entry',
+          approvalCode: 'WrongSecretGuess' + attempt,
+          metadataFileId: targetMetaFileId
+        })
+      }
     }).getContent());
     assert.equal(badAttempt.code, 'UNAUTHORIZED_ADMIN');
   }
   // 5th failed attempt should trigger rate limiting lockout
   sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      approvalCode: 'WrongSecretGuess4',
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        approvalCode: 'WrongSecretGuess4',
+        metadataFileId: targetMetaFileId
+      })
+    }
   });
   const lockedOutAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      approvalCode: 'WrongSecretGuess5',
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        approvalCode: 'WrongSecretGuess5',
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(lockedOutAttempt.code, 'RATE_LIMIT_EXCEEDED');
   assert.match(lockedOutAttempt.message, /Too many incorrect approval attempts/);
@@ -948,11 +1005,13 @@ function runTests() {
   // Reset approval fail cache and unlock entry with owner admin token
   sandbox.CacheService.getScriptCache().remove('rate_approval_fail_attempts');
   const finalUnlock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: adminToken,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: adminToken,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(finalUnlock.status, 'success');
 
@@ -960,111 +1019,161 @@ function runTests() {
   console.log('--- Step 11c: Testing Six-Digit Approval Number System ---');
   // 1. Non-admin cannot set the 6-digit approval code
   const unauthorizedSetCode = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_set_approval_code',
-      authToken: speakerToken,
-      approvalCode: '482910'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_set_approval_code',
+        authToken: speakerToken,
+        approvalCode: '482910'
+      })
+    }
   }).getContent());
   assert.equal(unauthorizedSetCode.code, 'UNAUTHORIZED_ADMIN');
 
   // 2. Owner admin cannot set a non-6-digit code
   const invalidFormatSetCode = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_set_approval_code',
-      authToken: adminToken,
-      approvalCode: '12345'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_set_approval_code',
+        authToken: adminToken,
+        approvalCode: '12345'
+      })
+    }
   }).getContent());
   assert.equal(invalidFormatSetCode.code, 'INVALID_APPROVAL_CODE');
 
   // 3. Owner admin sets a valid 6-digit approval code
   const validSetCode = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_set_approval_code',
-      authToken: adminToken,
-      approvalCode: '482910'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_set_approval_code',
+        authToken: adminToken,
+        approvalCode: '482910'
+      })
+    }
   }).getContent());
   assert.equal(validSetCode.status, 'success');
   assert.equal(validSetCode.action, 'admin_set_approval_code');
 
   // 4. Trusted Edo speaker approves and locks lesson using the 6-digit number
   const sixDigitLock = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_lock_entry',
-      authToken: '482910',
-      approvalCode: '482910',
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_lock_entry',
+        authToken: '482910',
+        approvalCode: '482910',
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(sixDigitLock.status, 'success');
   assert.equal(sixDigitLock.reviewStatus, 'approved_locked');
   assert.equal(sixDigitLock.approvedBy.role, 'trusted_approver');
 
-  // 5. The 6-digit number cannot unlock lessons, delete lessons, or change the 6-digit number
-  const sixDigitUnlockAttempt = JSON.parse(sandbox.doPost({
+  // 5. The 6-digit approval code CAN delete from Google Drive without owner admin token
+  const disposableUpload = JSON.parse(sandbox.doPost({
     postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: '482910',
-      metadataFileId: targetMetaFileId
+      action: 'upload_recording',
+      authToken: '',
+      lessonId: 'word-sixdigit-delete',
+      recordingId: 'rec-sixdigit-del-01',
+      english: 'Disposable Six Digit Delete',
+      edoText: 'Igho',
+      audioBase64: dummyWavB64,
+      mimeType: 'audio/wav'
     }) }
   }).getContent());
-  assert.equal(sixDigitUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
+  assert.equal(disposableUpload.status, 'success');
+  const disposableMetaId = disposableUpload.metadataFileId;
 
-  const sixDigitDeleteAttempt = JSON.parse(sandbox.doPost({
+  // Wrong 6-digit code fails
+  const wrongCodeDelete = JSON.parse(sandbox.doPost({
+    postData: { contents: JSON.stringify({
+      action: 'admin_delete_entry',
+      authToken: '000000',
+      approvalCode: '000000',
+      metadataFileId: disposableMetaId
+    }) }
+  }).getContent());
+  assert.equal(wrongCodeDelete.code, 'UNAUTHORIZED_ADMIN');
+
+  // Correct 6-digit code successfully deletes from Google Drive, moves to Trash and registers tombstone
+  const sixDigitDelete = JSON.parse(sandbox.doPost({
     postData: { contents: JSON.stringify({
       action: 'admin_delete_entry',
       authToken: '482910',
-      metadataFileId: targetMetaFileId
+      approvalCode: '482910',
+      metadataFileId: disposableMetaId
     }) }
   }).getContent());
-  assert.equal(sixDigitDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
+  assert.equal(sixDigitDelete.status, 'success');
+  assert.equal(sixDigitDelete.tombstoneRecorded, true);
+  assert.ok(files.get(disposableMetaId).trashed, 'Metadata file must be moved to Google Drive Trash');
+  assert.ok(files.get(disposableUpload.audioFileId).trashed, 'Audio file must be moved to Google Drive Trash');
+
+  // 6. The 6-digit number CANNOT unlock lessons or change the 6-digit approval code (Owner Admin only)
+  const sixDigitUnlockAttempt = JSON.parse(sandbox.doPost({
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: '482910',
+        metadataFileId: targetMetaFileId
+      })
+    }
+  }).getContent());
+  assert.equal(sixDigitUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
 
   const sixDigitChangeCodeAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_set_approval_code',
-      authToken: '482910',
-      approvalCode: '999999'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_set_approval_code',
+        authToken: '482910',
+        approvalCode: '999999'
+      })
+    }
   }).getContent());
   assert.equal(sixDigitChangeCodeAttempt.code, 'UNAUTHORIZED_ADMIN');
 
-  // 6. Owner admin can unlock the lesson afterward
+  // 7. Owner admin can unlock the lesson afterward
   const ownerUnlockAfterSixDigit = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: adminToken,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: adminToken,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(ownerUnlockAfterSixDigit.status, 'success');
-  console.log('✓ Six-digit approval number system verified end-to-end.');
+  console.log('✓ Six-digit approval number system verified end-to-end (Approve & Lock, Delete from Drive, protected Owner Admin functions).');
 
   // 12. Auto-Lock After 5 Distinct Verified Listens & Anonymous Deduplication
   console.log('--- Step 12: Testing 5-Listener Auto-Lock & Listener Deduplication ---');
   const autoLockUpload = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'upload_recording',
-      authToken: '',
-      lessonId: 'word-autolock-01',
-      recordingId: 'rec-autolock-01',
-      english: 'Auto Lock Test',
-      edoSpelling: 'Ebe',
-      audioBase64: dummyWavB64,
-      mimeType: 'audio/wav'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'upload_recording',
+        authToken: '',
+        lessonId: 'word-autolock-01',
+        recordingId: 'rec-autolock-01',
+        english: 'Auto Lock Test',
+        edoSpelling: 'Ebe',
+        audioBase64: dummyWavB64,
+        mimeType: 'audio/wav'
+      })
+    }
   }).getContent());
   assert.equal(autoLockUpload.status, 'success');
   const autoLockMetaId = autoLockUpload.metadataFileId;
 
   // Listener 1 plays twice
   const play1 = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'record_playback',
-      metadataFileId: autoLockMetaId,
-      listenerToken: 'listener-token-uuid-1111'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'record_playback',
+        metadataFileId: autoLockMetaId,
+        listenerToken: 'listener-token-uuid-1111'
+      })
+    }
   }).getContent());
   assert.equal(play1.status, 'success');
   assert.equal(play1.playCount, 1);
@@ -1072,11 +1181,13 @@ function runTests() {
   assert.equal(play1.autoLocked, false);
 
   const play1Repeat = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'record_playback',
-      metadataFileId: autoLockMetaId,
-      listenerToken: 'listener-token-uuid-1111'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'record_playback',
+        metadataFileId: autoLockMetaId,
+        listenerToken: 'listener-token-uuid-1111'
+      })
+    }
   }).getContent());
   assert.equal(play1Repeat.playCount, 2);
   assert.equal(play1Repeat.distinctListenersCount, 1, 'Duplicate listens from same token must not increment distinct count');
@@ -1085,11 +1196,13 @@ function runTests() {
   // Listeners 2, 3, 4 play
   for (let i = 2; i <= 4; i++) {
     const playN = JSON.parse(sandbox.doPost({
-      postData: { contents: JSON.stringify({
-        action: 'record_playback',
-        metadataFileId: autoLockMetaId,
-        listenerToken: `listener-token-uuid-${i}${i}${i}${i}`
-      }) }
+      postData: {
+        contents: JSON.stringify({
+          action: 'record_playback',
+          metadataFileId: autoLockMetaId,
+          listenerToken: `listener-token-uuid-${i}${i}${i}${i}`
+        })
+      }
     }).getContent());
     assert.equal(playN.distinctListenersCount, i);
     assert.equal(playN.autoLocked, false);
@@ -1097,11 +1210,13 @@ function runTests() {
 
   // Listener 5 plays -> triggers automatic lock!
   const play5 = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'record_playback',
-      metadataFileId: autoLockMetaId,
-      listenerToken: 'listener-token-uuid-5555'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'record_playback',
+        metadataFileId: autoLockMetaId,
+        listenerToken: 'listener-token-uuid-5555'
+      })
+    }
   }).getContent());
   assert.equal(play5.distinctListenersCount, 5);
   assert.equal(play5.autoLocked, false, 'Public listeners cannot approve or lock a lesson');
@@ -1112,21 +1227,25 @@ function runTests() {
   console.log('--- Step 13: Testing Admin Authoritative Deletion & Tombstones ---');
   // Unauthorized deletion attempt with non-admin speaker token
   const unauthDel = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_delete_entry',
-      authToken: speakerToken,
-      metadataFileId: autoLockMetaId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_delete_entry',
+        authToken: speakerToken,
+        metadataFileId: autoLockMetaId
+      })
+    }
   }).getContent());
   assert.equal(unauthDel.code, 'UNAUTHORIZED_ADMIN');
 
   // Authorized admin deletion
   const authDel = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_delete_entry',
-      authToken: adminToken,
-      metadataFileId: autoLockMetaId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_delete_entry',
+        authToken: adminToken,
+        metadataFileId: autoLockMetaId
+      })
+    }
   }).getContent());
   assert.equal(authDel.status, 'success');
   assert.equal(authDel.tombstoneRecorded, true);
@@ -1204,7 +1323,8 @@ function runTests() {
   const pigFile = files.get(savePigResp.entry.fileId);
   assert.equal(pigFile.mimeType, 'image/jpeg', 'Stored MIME type comes from magic bytes, not the caller');
   assert.ok(Buffer.from(pigFile.blob.getBytes()).equals(JPEG_BYTES), 'Stored bytes must be the exact binary image');
-  const imagesFolder = rootFolder.getFoldersByName('Edo Language Studio Images').next();
+  const imgFoldersIter = rootFolder.getFoldersByName('Images');
+  const imagesFolder = imgFoldersIter.hasNext() ? imgFoldersIter.next() : rootFolder.getFoldersByName('Edo Language Studio Images').next();
   assert.equal(pigFile.parentFolderId, imagesFolder.getId(), 'Image must live in the Images subfolder');
   assert.equal(Array.from(files.values()).filter(f => f.parentFolderId === TARGET_FOLDER_ID).length, rootFilesBefore, 'No files added to the original lesson folder');
   console.log('✓ Valid Wikimedia image for "Pig" saved as exact binary in the Images subfolder only.');
@@ -1266,13 +1386,107 @@ function runTests() {
   assert.equal(sandbox.isFileInStudioFolder(recAudioFile), true, 'Recordings must still pass the lesson-folder check');
   console.log('✓ Lesson-folder security check restored to direct children only.');
 
+  // 15: Testing 6-Digit Verification & Admin Lesson Image Upload
+  console.log('--- Step 15: Testing 6-Digit Verification & Admin Image Upload ---');
+
+  // 15a: verify_approval_code
+  const missingCodeResp = post({ action: 'verify_approval_code' });
+  assert.equal(missingCodeResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const badCodeResp = post({ action: 'verify_approval_code', approvalCode: '000000' });
+  assert.equal(badCodeResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const validCodeResp = post({ action: 'verify_approval_code', approvalCode: '482910' });
+  assert.equal(validCodeResp.status, 'success');
+  assert.equal(validCodeResp.verified, true);
+  assert.equal(validCodeResp.role, 'trusted_approver');
+  console.log('✓ verify_approval_code successfully verifies valid 6-digit number and rejects invalid numbers.');
+
+  // 15b: admin_upload_lesson_image
+  const unauthUploadResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    imageBase64: JPEG_BYTES.toString('base64'),
+    english: 'Test Word'
+  });
+  assert.equal(unauthUploadResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const fakeImageB64 = Buffer.from('not an image at all').toString('base64');
+  const badFormatResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910',
+    imageBase64: fakeImageB64,
+    english: 'Test Word'
+  });
+  assert.equal(badFormatResp.code, 'NOT_AN_IMAGE');
+
+  const uploadSuccessResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910',
+    imageBase64: JPEG_BYTES.toString('base64'),
+    english: 'Test Word'
+  });
+  assert.equal(uploadSuccessResp.status, 'success');
+  assert.ok(uploadSuccessResp.imageUrl && uploadSuccessResp.imageUrl.startsWith('https://drive.google.com/thumbnail?id='));
+  assert.ok(uploadSuccessResp.fileId);
+
+  const uploadedMetaFile = files.get(targetMetaFileId);
+  const lessonMetaAfterUpload = JSON.parse(uploadedMetaFile.blob.getDataAsString());
+  assert.equal(lessonMetaAfterUpload.imageFileId, uploadSuccessResp.fileId);
+  assert.equal(lessonMetaAfterUpload.imageUrl, uploadSuccessResp.imageUrl);
+
+  const indexResp2 = post({ action: 'get_image_index' });
+  assert.ok(indexResp2.index.images['lock test']);
+  assert.equal(indexResp2.index.images['lock test'].status, 'ready');
+  assert.equal(indexResp2.index.images['lock test'].fileId, uploadSuccessResp.fileId);
+  const uploadedImageFile = files.get(uploadSuccessResp.fileId);
+  assert.equal(uploadedImageFile.sharingAccess, 'ANYONE_WITH_LINK', 'Uploaded image must allow ANYONE_WITH_LINK view sharing without login');
+  console.log('✓ admin_upload_lesson_image sets ANYONE_WITH_LINK sharing so images display across all phones without login.');
+
+  // 15c: Verify image deletion isolation in admin_delete_entry
+  const foreignFolder = rootFolder.createFolder('Foreign Other Language Folder');
+  const foreignFile = foreignFolder.createFile(makeBlob(JPEG_BYTES, 'image/jpeg', 'foreign_unrelated.jpg'));
+  const foreignFileId = foreignFile.getId();
+
+  const metaWithForeignImage = rootFolder.createFile(makeBlob(JSON.stringify({
+    lessonId: 'foreign-test-lesson',
+    recordingId: 'rec-foreign-test',
+    englishWord: 'Foreign Test',
+    edoSpelling: 'Edo Text',
+    audioFileId: null,
+    imageFileId: foreignFileId,
+    category: 'word',
+    uploadedAt: new Date().toISOString()
+  }), 'application/json', 'foreign-test-lesson_rec-foreign-test_meta.json'));
+
+  const delForeignMetaResp = post({
+    action: 'admin_delete_entry',
+    metadataFileId: metaWithForeignImage.getId(),
+    approvalCode: '482910'
+  });
+  assert.equal(delForeignMetaResp.status, 'success');
+  assert.equal(foreignFile.isTrashed(), false, 'admin_delete_entry must NOT trash files outside Edo image/studio folder');
+  console.log('✓ admin_delete_entry strictly protects external/foreign files outside Edo folders from deletion.');
+
+  assert.equal(uploadedImageFile.isTrashed(), false);
+  const delLessonWithEdoImage = post({
+    action: 'admin_delete_entry',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910'
+  });
+  assert.equal(delLessonWithEdoImage.status, 'success');
+  assert.equal(uploadedImageFile.isTrashed(), true, 'admin_delete_entry must trash image inside Edo Images folder');
+  console.log('✓ admin_delete_entry successfully trashes image inside Edo Images folder.');
+
   // Test doGet health check (tokens are never accepted in GET URLs)
   const healthGet = JSON.parse(sandbox.doGet({}).getContent());
   assert.equal(healthGet.status, 'ok');
   assert.equal(healthGet.folderConnected, true);
   console.log('✓ Health check GET verified (tokens strictly confined to secure POST bodies).');
 
-  console.log('\n=== ALL AUTOMATED TESTS ON gas/Code.gs PASSED! ===');
+  console.log('\n=== ALL AUTOMATED TESTS ON gas/edo/Code.gs PASSED! ===');
 }
 
 runTests();

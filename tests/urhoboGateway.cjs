@@ -1,5 +1,5 @@
 /**
- * Comprehensive Test Harness for Urhobo Community Teachers Google Apps Script (gas/Code.gs)
+ * Comprehensive Test Harness for Urhobo Community Teachers Google Apps Script (gas/urhobo/Code.gs)
  *
  * Mocks the Google Apps Script environment:
  * - DriveApp (Folders, Files, FileIterator, Parent relationships)
@@ -53,7 +53,12 @@ function createMockDrive() {
       setTrashed: (t) => {
         file.trashed = Boolean(t);
       },
-      setSharing: () => {},
+      sharingAccess: null,
+      sharingPermission: null,
+      setSharing: (acc, perm) => {
+        file.sharingAccess = acc;
+        file.sharingPermission = perm;
+      },
       getMimeType: () => file.mimeType || 'application/octet-stream',
       getParents: () => {
         let done = false;
@@ -904,16 +909,16 @@ function runTests() {
   assert.equal(trustedUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
   console.log('✓ Destructive unlock action correctly blocked for trusted approver.');
 
-  // 3. Trusted speaker CANNOT delete the lesson (restricted strictly to owner admin)
-  const trustedDeleteAttempt = JSON.parse(sandbox.doPost({
+  // 3. Unauthorized deletion attempt without valid credentials correctly rejected
+  const unauthDeleteAttempt = JSON.parse(sandbox.doPost({
     postData: { contents: JSON.stringify({
       action: 'admin_delete_entry',
-      authToken: trustedCode,
+      authToken: 'WrongSecretGuess',
       metadataFileId: targetMetaFileId
     }) }
   }).getContent());
-  assert.equal(trustedDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
-  console.log('✓ Destructive delete action correctly blocked for trusted approver.');
+  assert.equal(unauthDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
+  console.log('✓ Unauthorized deletion attempt without valid credentials correctly blocked.');
 
   // 4. Rate-limiting on incorrect approval code guessing attempts
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -1002,44 +1007,82 @@ function runTests() {
   assert.equal(sixDigitLock.reviewStatus, 'approved_locked');
   assert.equal(sixDigitLock.approvedBy.role, 'trusted_approver');
 
-  // 5. The 6-digit number cannot unlock lessons, delete lessons, or change the 6-digit number
-  const sixDigitUnlockAttempt = JSON.parse(sandbox.doPost({
+  // 5. The 6-digit approval code CAN delete from Google Drive without owner admin token
+  const disposableUpload = JSON.parse(sandbox.doPost({
     postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: '482910',
-      metadataFileId: targetMetaFileId
+      action: 'upload_recording',
+      authToken: '',
+      lessonId: 'word-sixdigit-delete',
+      recordingId: 'rec-sixdigit-del-01',
+      english: 'Disposable Six Digit Delete',
+      edoText: 'Igho',
+      audioBase64: dummyWavB64,
+      mimeType: 'audio/wav'
     }) }
   }).getContent());
-  assert.equal(sixDigitUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
+  assert.equal(disposableUpload.status, 'success');
+  const disposableMetaId = disposableUpload.metadataFileId;
 
-  const sixDigitDeleteAttempt = JSON.parse(sandbox.doPost({
+  // Wrong 6-digit code fails
+  const wrongCodeDelete = JSON.parse(sandbox.doPost({
+    postData: { contents: JSON.stringify({
+      action: 'admin_delete_entry',
+      authToken: '000000',
+      approvalCode: '000000',
+      metadataFileId: disposableMetaId
+    }) }
+  }).getContent());
+  assert.equal(wrongCodeDelete.code, 'UNAUTHORIZED_ADMIN');
+
+  // Correct 6-digit code successfully deletes from Google Drive, moves to Trash and registers tombstone
+  const sixDigitDelete = JSON.parse(sandbox.doPost({
     postData: { contents: JSON.stringify({
       action: 'admin_delete_entry',
       authToken: '482910',
-      metadataFileId: targetMetaFileId
+      approvalCode: '482910',
+      metadataFileId: disposableMetaId
     }) }
   }).getContent());
-  assert.equal(sixDigitDeleteAttempt.code, 'UNAUTHORIZED_ADMIN');
+  assert.equal(sixDigitDelete.status, 'success');
+  assert.equal(sixDigitDelete.tombstoneRecorded, true);
+  assert.ok(files.get(disposableMetaId).trashed, 'Metadata file must be moved to Google Drive Trash');
+  assert.ok(files.get(disposableUpload.audioFileId).trashed, 'Audio file must be moved to Google Drive Trash');
+
+  // 6. The 6-digit number CANNOT unlock lessons or change the 6-digit approval code (Owner Admin only)
+  const sixDigitUnlockAttempt = JSON.parse(sandbox.doPost({
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: '482910',
+        metadataFileId: targetMetaFileId
+      })
+    }
+  }).getContent());
+  assert.equal(sixDigitUnlockAttempt.code, 'UNAUTHORIZED_ADMIN');
 
   const sixDigitChangeCodeAttempt = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_set_approval_code',
-      authToken: '482910',
-      approvalCode: '999999'
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_set_approval_code',
+        authToken: '482910',
+        approvalCode: '999999'
+      })
+    }
   }).getContent());
   assert.equal(sixDigitChangeCodeAttempt.code, 'UNAUTHORIZED_ADMIN');
 
-  // 6. Owner admin can unlock the lesson afterward
+  // 7. Owner admin can unlock the lesson afterward
   const ownerUnlockAfterSixDigit = JSON.parse(sandbox.doPost({
-    postData: { contents: JSON.stringify({
-      action: 'admin_unlock_entry',
-      authToken: adminToken,
-      metadataFileId: targetMetaFileId
-    }) }
+    postData: {
+      contents: JSON.stringify({
+        action: 'admin_unlock_entry',
+        authToken: adminToken,
+        metadataFileId: targetMetaFileId
+      })
+    }
   }).getContent());
   assert.equal(ownerUnlockAfterSixDigit.status, 'success');
-  console.log('✓ Six-digit approval number system verified end-to-end.');
+  console.log('✓ Six-digit approval number system verified end-to-end (Approve & Lock, Delete from Drive, protected Owner Admin functions).');
 
   // 12. Auto-Lock After 5 Distinct Verified Listens & Anonymous Deduplication
   console.log('--- Step 12: Testing 5-Listener Auto-Lock & Listener Deduplication ---');
@@ -1265,6 +1308,104 @@ function runTests() {
   assert.equal(sandbox.isFileInStudioFolder(pigFile), false, 'Images subfolder files must not pass the lesson-folder check');
   assert.equal(sandbox.isFileInStudioFolder(recAudioFile), true, 'Recordings must still pass the lesson-folder check');
   console.log('✓ Lesson-folder security check restored to direct children only.');
+
+  // 15: Testing 6-Digit Verification & Admin Lesson Image Upload
+  console.log('--- Step 15: Testing 6-Digit Verification & Admin Image Upload ---');
+
+  // 15a: verify_approval_code
+  const missingCodeResp = post({ action: 'verify_approval_code' });
+  assert.equal(missingCodeResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const badCodeResp = post({ action: 'verify_approval_code', approvalCode: '000000' });
+  assert.equal(badCodeResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const validCodeResp = post({ action: 'verify_approval_code', approvalCode: '482910' });
+  assert.equal(validCodeResp.status, 'success');
+  assert.equal(validCodeResp.verified, true);
+  assert.equal(validCodeResp.role, 'trusted_approver');
+  console.log('✓ verify_approval_code successfully verifies valid 6-digit number and rejects invalid numbers.');
+
+  // 15b: admin_upload_lesson_image
+  const unauthUploadResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    imageBase64: JPEG_BYTES.toString('base64'),
+    english: 'Test Word'
+  });
+  assert.equal(unauthUploadResp.code, 'UNAUTHORIZED_ADMIN');
+
+  const fakeImageB64 = Buffer.from('not an image at all').toString('base64');
+  const badFormatResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910',
+    imageBase64: fakeImageB64,
+    english: 'Test Word'
+  });
+  assert.equal(badFormatResp.code, 'NOT_AN_IMAGE');
+
+  const uploadSuccessResp = post({
+    action: 'admin_upload_lesson_image',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910',
+    imageBase64: JPEG_BYTES.toString('base64'),
+    english: 'Test Word'
+  });
+  assert.equal(uploadSuccessResp.status, 'success');
+  assert.ok(uploadSuccessResp.imageUrl && uploadSuccessResp.imageUrl.startsWith('https://drive.google.com/thumbnail?id='));
+  assert.ok(uploadSuccessResp.fileId);
+
+  const uploadedMetaFile = files.get(targetMetaFileId);
+  const lessonMetaAfterUpload = JSON.parse(uploadedMetaFile.blob.getDataAsString());
+  assert.equal(lessonMetaAfterUpload.imageFileId, uploadSuccessResp.fileId);
+  assert.equal(lessonMetaAfterUpload.imageUrl, uploadSuccessResp.imageUrl);
+
+  const indexResp2 = post({ action: 'get_image_index' });
+  assert.ok(indexResp2.index.images['lock test']);
+  assert.equal(indexResp2.index.images['lock test'].status, 'ready');
+  assert.equal(indexResp2.index.images['lock test'].fileId, uploadSuccessResp.fileId);
+  const uploadedImageFile = files.get(uploadSuccessResp.fileId);
+  assert.equal(uploadedImageFile.sharingAccess, 'ANYONE_WITH_LINK', 'Uploaded image must allow ANYONE_WITH_LINK view sharing without login');
+  console.log('✓ admin_upload_lesson_image sets ANYONE_WITH_LINK sharing so images display across all phones without login.');
+
+  // 15c: Verify image deletion isolation in admin_delete_entry
+  // Create a foreign file outside Urhobo folder (e.g., Edo folder or root)
+  const foreignFolder = rootFolder.createFolder('Foreign Other Language Folder');
+  const foreignFile = foreignFolder.createFile(makeBlob(JPEG_BYTES, 'image/jpeg', 'foreign_unrelated.jpg'));
+  const foreignFileId = foreignFile.getId();
+
+  // Create another lesson with foreign imageFileId injected into its metadata
+  const metaWithForeignImage = rootFolder.createFile(makeBlob(JSON.stringify({
+    lessonId: 'foreign-test-lesson',
+    recordingId: 'rec-foreign-test',
+    englishWord: 'Foreign Test',
+    edoSpelling: 'Urhobo Text',
+    audioFileId: null,
+    imageFileId: foreignFileId,
+    category: 'word',
+    uploadedAt: new Date().toISOString()
+  }), 'application/json', 'foreign-test-lesson_rec-foreign-test_meta.json'));
+
+  // Delete this lesson
+  const delForeignMetaResp = post({
+    action: 'admin_delete_entry',
+    metadataFileId: metaWithForeignImage.getId(),
+    approvalCode: '482910'
+  });
+  assert.equal(delForeignMetaResp.status, 'success');
+  assert.equal(foreignFile.isTrashed(), false, 'admin_delete_entry must NOT trash files outside Urhobo image/studio folder');
+  console.log('✓ admin_delete_entry strictly protects external/foreign files outside Urhobo folders from deletion.');
+
+  // Now verify that deleting targetMetaFileId DOES trash its Urhobo image file
+  assert.equal(uploadedImageFile.isTrashed(), false);
+  const delLessonWithUrhoboImage = post({
+    action: 'admin_delete_entry',
+    metadataFileId: targetMetaFileId,
+    approvalCode: '482910'
+  });
+  assert.equal(delLessonWithUrhoboImage.status, 'success');
+  assert.equal(uploadedImageFile.isTrashed(), true, 'admin_delete_entry must trash image inside Urhobo Images folder');
+  console.log('✓ admin_delete_entry successfully trashes image inside Urhobo Images folder.');
 
   // Test doGet health check (tokens are never accepted in GET URLs)
   const healthGet = JSON.parse(sandbox.doGet({}).getContent());

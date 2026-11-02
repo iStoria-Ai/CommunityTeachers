@@ -105,7 +105,7 @@ export function getGatewayUrl(): string {
     if (stored && stored.startsWith('https://script.google.com/macros/s/')) {
       return stored.trim();
     }
-  } catch {}
+  } catch { }
 
   return getDefaultGatewayUrl();
 }
@@ -133,55 +133,58 @@ export function setGatewayUrl(url: string): void {
 export async function checkGatewayHealth(url = getGatewayUrl()): Promise<GatewayHealthResult> {
   const startTime = Date.now();
   try {
-    const response = await fetch(url, {
+    const lang = getActiveLanguage();
+    const separator = url.includes('?') ? '&' : '?';
+    const targetUrl = `${url}${separator}lang=${encodeURIComponent(lang.id)}`;
+    const response = await fetch(targetUrl, {
       method: 'GET',
       redirect: 'follow',
       mode: 'cors'
     });
 
-    const durationMs = Date.now() - startTime;
-    const isLoginRedirect = response.url.includes('accounts.google.com');
+      const durationMs = Date.now() - startTime;
+      const isLoginRedirect = response.url.includes('accounts.google.com');
 
-    if (isLoginRedirect) {
-      return {
-        ok: false,
-        httpStatus: response.status,
-        durationMs,
-        isLoginRedirect: true,
-        error: 'Deployment is set to "Only myself". Google redirected to a login page, blocking anonymous browser access.'
-      };
-    }
+      if(isLoginRedirect) {
+        return {
+          ok: false,
+          httpStatus: response.status,
+          durationMs,
+          isLoginRedirect: true,
+          error: 'Deployment is set to "Only myself". Google redirected to a login page, blocking anonymous browser access.'
+        };
+      }
 
-    if (!response.ok) {
-      return {
-        ok: false,
-        httpStatus: response.status,
-        durationMs,
-        error: `Gateway returned HTTP ${response.status} ${response.statusText}`
-      };
-    }
+    if(!response.ok) {
+        return {
+          ok: false,
+          httpStatus: response.status,
+          durationMs,
+          error: `Gateway returned HTTP ${response.status} ${response.statusText}`
+  };
+}
 
-    const data = await response.json();
-    return {
-      ok: data.status === 'ok' && Boolean(data.folderConnected),
-      httpStatus: response.status,
-      durationMs,
-      data
-    };
+const data = await response.json();
+return {
+  ok: data.status === 'ok' && Boolean(data.folderConnected),
+  httpStatus: response.status,
+  durationMs,
+  data
+};
   } catch (err: any) {
-    const durationMs = Date.now() - startTime;
-    const errMsg = String(err?.message || err);
-    const isCors = errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('networkerror') || errMsg.toLowerCase().includes('cors');
+  const durationMs = Date.now() - startTime;
+  const errMsg = String(err?.message || err);
+  const isCors = errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('networkerror') || errMsg.toLowerCase().includes('cors');
 
-    return {
-      ok: false,
-      durationMs,
-      isCorsBlocked: isCors,
-      error: isCors
-        ? 'Browser CORS error or network block. This typically occurs if the deployment is set to "Only myself" instead of "Anyone", causing a redirect to accounts.google.com without CORS headers.'
-        : errMsg
-    };
-  }
+  return {
+    ok: false,
+    durationMs,
+    isCorsBlocked: isCors,
+    error: isCors
+      ? 'Browser CORS error or network block. This typically occurs if the deployment is set to "Only myself" instead of "Anyone", causing a redirect to accounts.google.com without CORS headers.'
+      : errMsg
+  };
+}
 }
 
 /**
@@ -799,6 +802,82 @@ export async function recordPlaybackToGateway(
 }
 
 /**
+ * Verifies a six-digit approval number against the Google Apps Script gateway.
+ * Enforces server-side brute force rate limiting (15-min lockout after 5 failures).
+ */
+export async function verifyApprovalCode(
+  code: string,
+  url = getGatewayUrl()
+): Promise<{ ok: boolean; verified: boolean; message?: string }> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'verify_approval_code',
+        language: getActiveLanguage().id,
+        approvalCode: code.trim()
+      }),
+      redirect: 'follow',
+      mode: 'cors'
+    });
+    if (!response.ok) return { ok: false, verified: false, message: `HTTP ${response.status}` };
+    const data = await response.json();
+    return {
+      ok: data.status === 'success' && Boolean(data.verified),
+      verified: Boolean(data.verified),
+      message: data.message || (data.status === 'success' ? 'Approval number verified.' : 'Invalid approval number.')
+    };
+  } catch (err: any) {
+    return { ok: false, verified: false, message: String(err?.message || err) };
+  }
+}
+
+/**
+ * Uploads or replaces a lesson's image in Google Drive.
+ * Requires verification of the six-digit approval code or owner administrator token.
+ */
+export async function adminUploadLessonImage(
+  metadataFileId: string,
+  imageBase64: string,
+  credentialOrCode: string,
+  english?: string,
+  url = getGatewayUrl()
+): Promise<{ ok: boolean; imageUrl?: string; fileId?: string; message?: string }> {
+  try {
+    const isCode = /^\d{4,8}$/.test(credentialOrCode.trim());
+    const payload: Record<string, any> = {
+      action: 'admin_upload_lesson_image',
+      language: getActiveLanguage().id,
+      metadataFileId: metadataFileId.trim(),
+      imageBase64: imageBase64,
+      english: english || ''
+    };
+    if (isCode) {
+      payload.approvalCode = credentialOrCode.trim();
+    } else {
+      payload.authToken = credentialOrCode.trim();
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      mode: 'cors'
+    });
+    if (!response.ok) return { ok: false, message: `Gateway HTTP ${response.status}` };
+    const data = await response.json();
+    if (data.status === 'success' && data.imageUrl) {
+      return { ok: true, imageUrl: data.imageUrl, fileId: data.fileId, message: data.message };
+    }
+    return { ok: false, message: data.message || 'Failed to upload image' };
+  } catch (err: any) {
+    return { ok: false, message: String(err?.message || err) };
+  }
+}
+
+/**
  * Permanently removes a contribution and its recording from Google Drive.
  * Requires administrator role verification on the Google Apps Script gateway.
  * Records a tombstone to purge cached instances across client devices and
@@ -806,14 +885,16 @@ export async function recordPlaybackToGateway(
  */
 export async function adminDeleteEntry(
   metadataFileId: string,
-  adminToken: string,
+  credentialOrCode: string,
   url = getGatewayUrl()
 ): Promise<{ ok: boolean; status: string; recordingId?: string; lessonId?: string; tombstoneRecorded?: boolean; message: string }> {
   try {
+    const trimmed = credentialOrCode.trim();
     const payload = {
       action: 'admin_delete_entry',
       language: getActiveLanguage().id,
-      authToken: adminToken.trim(),
+      authToken: trimmed,
+      approvalCode: trimmed,
       metadataFileId: metadataFileId.trim()
     };
     const response = await fetch(url, {
@@ -861,7 +942,7 @@ export function getPersistentUploadQueue(): QueuedUpload[] {
       const legacyRaw = localStorage.getItem('upload_queue_v1') || localStorage.getItem('pending_upload_queue_v1');
       if (legacyRaw) {
         raw = legacyRaw;
-        try { localStorage.setItem(key, legacyRaw); } catch (_) {}
+        try { localStorage.setItem(key, legacyRaw); } catch (_) { }
       }
     }
     return raw ? JSON.parse(raw) : [];

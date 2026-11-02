@@ -883,6 +883,26 @@ function applyIndexEntries(index: CloudImageIndex | null | undefined, notify: bo
 }
 
 /**
+ * Registers a newly uploaded lesson image in the in-memory cache and notifies UI listeners.
+ */
+export function registerUploadedImage(english: string, url: string, fileId = ''): void {
+  const norm = normalizeEnglish(english);
+  const cKey = cacheKey(norm);
+  inMemoryCache.set(cKey, url);
+  sharedCloudIndex.set(cKey, {
+    vocabId: norm,
+    normEnglish: norm,
+    english,
+    category: '',
+    fileId,
+    url,
+    status: 'ready',
+    updatedAt: new Date().toISOString(),
+  });
+  notifyImageListeners(norm, url, 'ready');
+}
+
+/**
  * Loads the shared Google Drive image index and warms in-memory caches.
  * Read-only mode (Children's Library): reads only — no local snapshot writes,
  * no discovery and no Google Drive saves.

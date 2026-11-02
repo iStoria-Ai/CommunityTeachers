@@ -101,8 +101,9 @@ const welcomeSource = require('fs').readFileSync('src/screens/WelcomeScreen.tsx'
 assert.ok(welcomeSource.includes('Community Teachers'), 'Welcome screen must display Community Teachers brand');
 assert.ok(welcomeSource.includes('QRCodeModal'), 'Welcome screen must render QRCodeModal');
 assert.ok(welcomeSource.includes('type="library"'), 'Welcome screen must pass type="library" to modal');
-assert.ok(welcomeSource.includes('libQrSvg'), 'Welcome screen must render inline Library QR SVG card');
-console.log('✓ WelcomeScreen Library QR code card and modal integration verified.');
+assert.ok(welcomeSource.includes('Open ${lang.name} Library QR Code') || welcomeSource.includes('Library QR Code'), 'Welcome screen must include top right QR code button');
+assert.ok(!welcomeSource.includes('libQrSvg'), 'Large welcome page QR code card must be removed');
+console.log('✓ WelcomeScreen Library QR code top-right button and modal verified (large card removed).');
 
 // Test 4b: Verify Settings Section QR Code Integration in App.tsx
 const appSource = require('fs').readFileSync('src/App.tsx', 'utf8');

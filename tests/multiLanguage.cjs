@@ -219,6 +219,229 @@ assert.ok(edoRead.includes('protected_edo_data'), 'Edo reads its own protected d
 assert.ok(!edoRead.includes('updated_urhobo_data'), 'Edo data is completely isolated from Urhobo updates');
 console.log('✓ Cross-language local storage isolation and zero-collision verified.');
 
+// --- Test 8: 6-Digit Approval Code Deletion & Cross-Language Gateway Isolation ---
+console.log('--- Test 8: 6-Digit Approval Code Deletion & Cross-Language Gateway Isolation ---');
+
+function createIsolatedGatewaySandbox(codePath, targetFolderId, serviceName) {
+  const folders = new Map();
+  const files = new Map();
+  const scriptProps = new Map();
+  const scriptCache = new Map();
+
+  function makeBlob(bytes, mimeType, name) {
+    const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || '', 'utf8');
+    return {
+      getBytes: () => buffer,
+      getDataAsString: () => buffer.toString('utf8'),
+      getContentType: () => mimeType || 'application/octet-stream',
+      getName: () => name || 'blob',
+      setName: function(n) { name = n; return this; }
+    };
+  }
+
+  function createFile(blob, parentFolderId) {
+    const fileId = 'file_' + Math.random().toString(36).substring(2, 10);
+    const file = {
+      id: fileId,
+      name: blob.getName(),
+      mimeType: blob.getContentType(),
+      blob: blob,
+      parentFolderId: parentFolderId || targetFolderId,
+      trashed: false,
+      getId: () => fileId,
+      isTrashed: () => file.trashed,
+      getName: () => file.name,
+      getSize: () => file.blob.getBytes().length,
+      getBlob: () => file.blob,
+      setContent: (text) => { file.blob = makeBlob(text, file.mimeType, file.name); },
+      setTrashed: (t) => { file.trashed = Boolean(t); },
+      setSharing: () => {},
+      getMimeType: () => file.mimeType || 'application/octet-stream',
+      getParents: () => {
+        let done = false;
+        return {
+          hasNext: () => !done && !file.trashed,
+          next: () => {
+            done = true;
+            return folders.get(file.parentFolderId);
+          }
+        };
+      }
+    };
+    files.set(fileId, file);
+    return file;
+  }
+
+  const rootFolder = {
+    getId: () => targetFolderId,
+    getName: () => serviceName,
+    getParents: () => ({ hasNext: () => false, next: () => null }),
+    createFile: (blob) => createFile(blob, targetFolderId),
+    getFilesByName: (name) => {
+      const matched = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === targetFolderId && f.name === name);
+      let idx = 0;
+      return { hasNext: () => idx < matched.length, next: () => matched[idx++] };
+    },
+    getFiles: () => {
+      const matched = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === targetFolderId);
+      let idx = 0;
+      return { hasNext: () => idx < matched.length, next: () => matched[idx++] };
+    },
+    getFoldersByName: (name) => {
+      const matched = Array.from(folders.values()).filter(f => f.getParentId && f.getParentId() === targetFolderId && f.getName() === name);
+      let idx = 0;
+      return { hasNext: () => idx < matched.length, next: () => matched[idx++] };
+    },
+    createFolder: (name) => {
+      const subId = 'sub_' + Math.random().toString(36).substring(2, 10);
+      const sub = {
+        getId: () => subId,
+        getName: () => name,
+        getParentId: () => targetFolderId,
+        getParents: () => {
+          let done = false;
+          return { hasNext: () => !done, next: () => { done = true; return rootFolder; } };
+        },
+        createFile: (blob) => createFile(blob, subId),
+        getFilesByName: (fileName) => {
+          const matched = Array.from(files.values()).filter(f => !f.trashed && f.parentFolderId === subId && f.name === fileName);
+          let idx = 0;
+          return { hasNext: () => idx < matched.length, next: () => matched[idx++] };
+        }
+      };
+      folders.set(subId, sub);
+      return sub;
+    }
+  };
+  folders.set(targetFolderId, rootFolder);
+
+  const sandbox = {
+    DriveApp: {
+      getFolderById: (id) => {
+        if (!folders.has(id)) throw new Error('Folder not found: ' + id);
+        return folders.get(id);
+      },
+      getFileById: (id) => {
+        if (!files.has(id)) throw new Error('File not found: ' + id);
+        return files.get(id);
+      }
+    },
+    Utilities: {
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      Charset: { UTF_8: 'UTF_8' },
+      computeDigest: (alg, text) => {
+        const crypto = require('node:crypto');
+        const hash = crypto.createHash('sha256').update(String(text || ''), 'utf8').digest();
+        return Array.from(hash);
+      },
+      newBlob: (bytes, mime, name) => makeBlob(bytes, mime, name),
+      base64Decode: (b64) => Buffer.from(b64, 'base64'),
+      base64Encode: (bytes) => Buffer.from(bytes).toString('base64')
+    },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (k) => scriptProps.get(k) || null,
+        setProperty: (k, v) => scriptProps.set(k, String(v)),
+        deleteProperty: (k) => scriptProps.delete(k),
+        getProperties: () => Object.fromEntries(scriptProps.entries())
+      })
+    },
+    CacheService: {
+      getScriptCache: () => ({
+        get: (k) => scriptCache.get(k) || null,
+        put: (k, v) => scriptCache.set(k, String(v)),
+        remove: (k) => scriptCache.delete(k)
+      })
+    },
+    LockService: {
+      getScriptLock: () => ({ waitLock: () => true, releaseLock: () => true })
+    },
+    ContentService: {
+      MimeType: { JSON: 'application/json' },
+      createTextOutput: (c) => ({ setMimeType: function() { return this; }, getContent: () => c })
+    },
+    Logger: { log: () => {} },
+    console: console
+  };
+
+  const codeSource = fs.readFileSync(codePath, 'utf8');
+  vm.createContext(sandbox);
+  vm.runInContext(codeSource, sandbox);
+
+  return {
+    sandbox,
+    files,
+    folders,
+    scriptProps,
+    post: (payload) => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(payload) } }).getContent())
+  };
+}
+
+const EDO_FOLDER_ID = '1eOYgm0ZyyPiw92NqsWFTYsv_9fZ8Jf2D';
+const URH_FOLDER_ID = '1fLh4pArYSyOf6I8yF54AlT3BsMvPP1fS';
+const edoGw = createIsolatedGatewaySandbox(path.join(__dirname, '../gas/edo/Code.gs'), EDO_FOLDER_ID, 'Edo Language Studio');
+const urhGw = createIsolatedGatewaySandbox(path.join(__dirname, '../gas/urhobo/Code.gs'), URH_FOLDER_ID, 'Urhobo Community Teachers');
+
+const adminOwnerToken = 'super-secret-admin-token-2026';
+edoGw.scriptProps.set('CONTRIBUTOR_DIRECTORY', JSON.stringify({ [adminOwnerToken]: { id: 'admin-lead', name: 'Admin', role: 'admin' } }));
+urhGw.scriptProps.set('CONTRIBUTOR_DIRECTORY', JSON.stringify({ [adminOwnerToken]: { id: 'admin-lead', name: 'Admin', role: 'admin' } }));
+
+// 1. Owner Admin sets distinct 6-digit codes for each language
+assert.equal(edoGw.post({ action: 'admin_set_approval_code', authToken: adminOwnerToken, approvalCode: '123456' }).status, 'success');
+assert.equal(urhGw.post({ action: 'admin_set_approval_code', authToken: adminOwnerToken, approvalCode: '654321' }).status, 'success');
+
+// 2. Upload lessons to each respective gateway
+const dummyAudio = Buffer.from('RIFF....WAVEfmt ').toString('base64');
+const edoUpload = edoGw.post({ action: 'upload_recording', lessonId: 'edo-lesson-01', recordingId: 'rec-edo-01', english: 'Water', edoText: 'Ame', audioBase64: dummyAudio, mimeType: 'audio/wav' });
+const urhUpload = urhGw.post({ action: 'upload_recording', lessonId: 'urh-lesson-01', recordingId: 'rec-urh-01', english: 'Water', spelling: 'Ame', audioBase64: dummyAudio, mimeType: 'audio/wav' });
+assert.equal(edoUpload.status, 'success');
+assert.equal(urhUpload.status, 'success');
+
+// 3. Unauthorized deletion attempts without valid 6-digit code are rejected
+const unauthEdoDel = edoGw.post({ action: 'admin_delete_entry', metadataFileId: edoUpload.metadataFileId });
+assert.equal(unauthEdoDel.code, 'UNAUTHORIZED_ADMIN');
+
+const wrongCodeEdoDel = edoGw.post({ action: 'admin_delete_entry', approvalCode: '000000', metadataFileId: edoUpload.metadataFileId });
+assert.equal(wrongCodeEdoDel.code, 'UNAUTHORIZED_ADMIN');
+
+// 4. Cross-language 6-digit code rejection: Urhobo code on Edo gateway rejected
+const crossCodeDel = edoGw.post({ action: 'admin_delete_entry', approvalCode: '654321', metadataFileId: edoUpload.metadataFileId });
+assert.equal(crossCodeDel.code, 'UNAUTHORIZED_ADMIN');
+
+// 5. Successful deletion using valid 6-digit code on Edo gateway
+const validEdoDel = edoGw.post({ action: 'admin_delete_entry', approvalCode: '123456', metadataFileId: edoUpload.metadataFileId });
+assert.equal(validEdoDel.status, 'success');
+assert.equal(validEdoDel.tombstoneRecorded, true);
+assert.ok(edoGw.files.get(edoUpload.metadataFileId).trashed, 'Edo metadata moved to Trash');
+assert.ok(edoGw.files.get(edoUpload.audioFileId).trashed, 'Edo audio moved to Trash');
+
+// Verify Urhobo gateway files and folders were completely untouched
+assert.equal(urhGw.files.get(urhUpload.metadataFileId).trashed, false, 'Urhobo files must NOT be touched by Edo deletion');
+assert.equal(urhGw.files.get(urhUpload.audioFileId).trashed, false, 'Urhobo files must NOT be touched by Edo deletion');
+
+// 6. Successful deletion using valid 6-digit code on Urhobo gateway
+const validUrhDel = urhGw.post({ action: 'admin_delete_entry', approvalCode: '654321', metadataFileId: urhUpload.metadataFileId });
+assert.equal(validUrhDel.status, 'success');
+assert.equal(validUrhDel.tombstoneRecorded, true);
+assert.ok(urhGw.files.get(urhUpload.metadataFileId).trashed, 'Urhobo metadata moved to Trash');
+assert.ok(urhGw.files.get(urhUpload.audioFileId).trashed, 'Urhobo audio moved to Trash');
+
+// 7. Security: 6-digit code CANNOT unlock lessons or change the approval code
+const edoUpload2 = edoGw.post({ action: 'upload_recording', lessonId: 'edo-lesson-02', recordingId: 'rec-edo-02', english: 'House', edoText: 'Owa', audioBase64: dummyAudio, mimeType: 'audio/wav' });
+edoGw.post({ action: 'admin_lock_entry', approvalCode: '123456', metadataFileId: edoUpload2.metadataFileId });
+
+const unlockAttempt = edoGw.post({ action: 'admin_unlock_entry', approvalCode: '123456', metadataFileId: edoUpload2.metadataFileId });
+assert.equal(unlockAttempt.code, 'UNAUTHORIZED_ADMIN');
+
+const changeCodeAttempt = edoGw.post({ action: 'admin_set_approval_code', approvalCode: '123456', newCode: '999999' });
+assert.equal(changeCodeAttempt.code, 'UNAUTHORIZED_ADMIN');
+
+// Owner admin can unlock
+const ownerUnlock = edoGw.post({ action: 'admin_unlock_entry', authToken: adminOwnerToken, metadataFileId: edoUpload2.metadataFileId });
+assert.equal(ownerUnlock.status, 'success');
+
+console.log('✓ 6-Digit approval code deletion, Trash management, and cross-language isolation verified.');
+
 // Reset to Edo at end
 api.setActiveLanguage('edo');
 console.log('\n=== ALL MULTI-LANGUAGE ARCHITECTURE TESTS PASSED ===\n');

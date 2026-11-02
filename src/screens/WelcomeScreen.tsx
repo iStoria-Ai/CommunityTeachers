@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { ArrowRight, QrCode, GraduationCap } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowRight, QrCode } from 'lucide-react';
 import { QRCodeModal } from '../components/QRCodeModal';
 import { getActiveLanguage } from '../languages';
-import { generateQRCode, getQRCodeSvgPath } from '../utils/qrCode';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -13,12 +12,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted }) =>
   const [heroError, setHeroError] = useState(false);
   const [emblemError, setEmblemError] = useState(false);
   const lang = getActiveLanguage();
-
-  // Standards-compliant Library QR Code rendered directly on welcome page
-  const libQrSvg = useMemo(() => {
-    const data = generateQRCode(lang.libraryUrl);
-    return getQRCodeSvgPath(data, 4, 16);
-  }, [lang.libraryUrl]);
 
   return (
     <div className="edo-screen justify-between overflow-y-auto relative">
@@ -83,52 +76,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted }) =>
             Build a smarter tomorrow.
           </p>
 
-          {/* Community Library Direct Scan Card on Welcome Page */}
-          <div
-            onClick={() => setShowQr(true)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setShowQr(true);
-              }
-            }}
-            className="w-full max-w-[325px] mt-2.5 mb-1 p-2.5 bg-white/95 hover:bg-white active:scale-[0.99] rounded-2xl border border-[#DFD6C2] shadow-xs flex items-center gap-3 cursor-pointer text-left transition select-none"
-            title={`Scan or tap to open ${lang.name} Community Library`}
-            aria-label={`Scan or tap to open ${lang.name} Community Library`}
-          >
-            <div className="w-[78px] h-[78px] shrink-0 bg-white rounded-xl p-1 border border-[#E5DEC9] flex items-center justify-center shadow-2xs">
-              <svg
-                viewBox={`0 0 ${libQrSvg.viewBoxSize} ${libQrSvg.viewBoxSize}`}
-                className="w-full h-full"
-                shapeRendering="crispEdges"
-                role="img"
-                aria-label={`${lang.name} Community Library QR Code`}
-              >
-                <rect
-                  x="0"
-                  y="0"
-                  width={libQrSvg.viewBoxSize}
-                  height={libQrSvg.viewBoxSize}
-                  fill="#FFFFFF"
-                />
-                <path d={libQrSvg.path} fill="#18241B" />
-              </svg>
-            </div>
-            <div className="flex flex-col min-w-0 pr-1">
-              <div className="flex items-center gap-1.5 text-[#157A4C] font-bold text-[13px] leading-tight">
-                <GraduationCap className="w-4 h-4 shrink-0 text-[#157A4C]" />
-                <span>{lang.name} Library</span>
-              </div>
-              <span className="text-[11.5px] text-[#445046] font-medium leading-snug mt-0.5">
-                Scan with phone camera to listen &amp; explore
-              </span>
-              <span className="text-[10.5px] font-mono text-[#7D8880] truncate mt-0.5">
-                {lang.libraryUrl}
-              </span>
-            </div>
-          </div>
         </div>
 
         {/* Single Main Action Button */}

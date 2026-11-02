@@ -13,7 +13,8 @@ import {
   ChevronUp,
   ChevronRight,
   Loader2,
-  RotateCcw
+  RotateCcw,
+  Upload
 } from 'lucide-react';
 import { getChildrenAudio } from '../services/childrenLibraryService';
 import { EdoEntry } from '../types/edo';
@@ -31,7 +32,7 @@ import {
   getPendingEditsChangedEventName,
   CloudEditDraft
 } from '../services/communityLibrary';
-import { adminLockEntry, adminUnlockEntry, adminDeleteEntry, adminSetApprovalCode, recordPlaybackToGateway } from '../services/cloudSyncService';
+import { adminLockEntry, adminUnlockEntry, adminDeleteEntry, adminSetApprovalCode, verifyApprovalCode, adminUploadLessonImage, recordPlaybackToGateway } from '../services/cloudSyncService';
 import {
   isAudioReady,
   isAudioFailed,
@@ -42,7 +43,8 @@ import {
   enqueueImageDiscovery,
   prioritizeImageDiscovery,
   getImageStatus,
-  syncSharedImageIndex
+  syncSharedImageIndex,
+  registerUploadedImage
 } from '../services/imageService';
 
 export interface LanguageLibraryScreenProps {
@@ -238,6 +240,15 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   const [setCodeError, setSetCodeError] = useState<string | null>(null);
   const [setCodeSuccess, setSetCodeSuccess] = useState<string | null>(null);
 
+  // Manual image upload state (inside Administrator options)
+  const [isApprovalCodeVerified, setIsApprovalCodeVerified] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [imageUploadBusy, setImageUploadBusy] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const [imageUploadSuccess, setImageUploadSuccess] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+
   const recorderRef = useRef<MicrophoneRecorder | null>(null);
   const timerRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -352,6 +363,12 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     setAdminDeleteError(null);
     setSetCodeError(null);
     setSetCodeSuccess(null);
+    setIsApprovalCodeVerified(false);
+    setVerifyBusy(false);
+    setVerifyError(null);
+    setImageUploadBusy(false);
+    setImageUploadError(null);
+    setImageUploadSuccess(null);
   };
 
   const handleCloseModal = () => {
@@ -361,6 +378,12 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       if (timerRef.current) window.clearInterval(timerRef.current);
     }
     setSelectedEntry(null);
+    setIsApprovalCodeVerified(false);
+    setVerifyBusy(false);
+    setVerifyError(null);
+    setImageUploadBusy(false);
+    setImageUploadError(null);
+    setImageUploadSuccess(null);
   };
 
   // Requirement 3: Only completed lessons appear in learning Library
@@ -831,20 +854,20 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   // Admin delete submission (Permanently remove from Google Drive)
   const handleAdminDelete = async () => {
     if (!selectedEntry || !selectedEntry.cloudMetadataFileId) return;
-    const token = adminTokenInput.trim();
-    if (!token) {
-      setAdminDeleteError('Please enter your administrator credential.');
+    const credential = adminMode === 'code' ? approvalCodeInput.trim() : adminTokenInput.trim();
+    if (!credential) {
+      setAdminDeleteError(adminMode === 'code' ? 'Please enter the 6-digit approval number.' : 'Please enter your administrator credential.');
       return;
     }
     const confirmed = typeof window !== 'undefined'
-      ? window.confirm(`Permanently delete "${selectedEntry.english}" from Google Drive? This action cannot be undone.`)
+      ? window.confirm(`Permanently delete "${selectedEntry.english}" from Google Drive? This will move the lesson files to Trash and cannot be undone.`)
       : true;
     if (!confirmed) return;
 
     setAdminDeleteBusy(true);
     setAdminDeleteError(null);
     try {
-      const res = await adminDeleteEntry(selectedEntry.cloudMetadataFileId, token);
+      const res = await adminDeleteEntry(selectedEntry.cloudMetadataFileId, credential);
       if (res.ok) {
         if (selectedEntry.cloudAudioFileId) {
           invalidateSessionAudio(selectedEntry.cloudAudioFileId);
@@ -852,12 +875,88 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
         if (onLibraryChanged) await onLibraryChanged();
         handleCloseModal();
       } else {
-        setAdminDeleteError(res.message || 'Deletion failed. Invalid admin token.');
+        setAdminDeleteError(res.message || 'Deletion failed. Invalid code or token.');
       }
     } catch (err: any) {
       setAdminDeleteError(String(err?.message || err));
     } finally {
       setAdminDeleteBusy(false);
+    }
+  };
+
+  // Verify six-digit approval code
+  const handleVerifyApprovalCode = async () => {
+    const code = approvalCodeInput.trim();
+    setVerifyError(null);
+    if (!/^\d{4,8}$/.test(code)) {
+      setVerifyError('Please enter the 6-digit approval number.');
+      return;
+    }
+    setVerifyBusy(true);
+    try {
+      const res = await verifyApprovalCode(code);
+      if (res.ok && res.verified) {
+        setIsApprovalCodeVerified(true);
+        setVerifyError(null);
+      } else {
+        setIsApprovalCodeVerified(false);
+        setVerifyError(res.message || 'Invalid 6-digit approval number.');
+      }
+    } catch (err: any) {
+      setIsApprovalCodeVerified(false);
+      setVerifyError(String(err?.message || err));
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
+  // Upload or replace image from phone or computer
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedEntry || !selectedEntry.cloudMetadataFileId) return;
+
+    setImageUploadError(null);
+    setImageUploadSuccess(null);
+
+    if (!file.type.startsWith('image/')) {
+      setImageUploadError('Please select a valid JPEG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setImageUploadError('Image size exceeds 5 MB limit.');
+      return;
+    }
+
+    setImageUploadBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const credential = adminMode === 'code' ? approvalCodeInput.trim() : (adminTokenInput.trim() || approvalCodeInput.trim());
+      const res = await adminUploadLessonImage(
+        selectedEntry.cloudMetadataFileId,
+        dataUrl,
+        credential,
+        selectedEntry.english
+      );
+
+      if (res.ok && res.imageUrl) {
+        setImageUploadSuccess('Image saved to Google Drive!');
+        registerUploadedImage(selectedEntry.english, res.imageUrl);
+        setSelectedEntry(prev => prev ? { ...prev, imageUrl: res.imageUrl } : null);
+        if (onLibraryChanged) await onLibraryChanged();
+      } else {
+        setImageUploadError(res.message || 'Image upload failed.');
+      }
+    } catch (err: any) {
+      setImageUploadError(String(err?.message || err));
+    } finally {
+      setImageUploadBusy(false);
     }
   };
 
@@ -1294,58 +1393,124 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
 
                   {showAdminUnlock && (
                     <div className="mt-2 p-2.5 bg-white border border-[#E6DFCF] rounded-xl space-y-2">
-                      <label htmlFor="admin-unlock-token" className="block text-[11px] font-bold text-[#1A241D]">
-                        Owner Administrator Token
-                      </label>
-                      <input
-                        id="admin-unlock-token"
-                        type="password"
-                        value={adminTokenInput}
-                        onChange={(e) => setAdminTokenInput(e.target.value)}
-                        placeholder="Enter owner admin token"
-                        className="w-full py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs focus:outline-none focus:border-[#157A4C]"
-                      />
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={6}
-                          value={newApprovalCodeInput}
-                          onChange={(e) => setNewApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          placeholder="Set 6-digit approval code"
-                          className="flex-1 py-1.5 px-2.5 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
-                        />
+                      {/* Compact Mode Switcher: 6-Digit Approval vs Owner Admin */}
+                      <div className="flex rounded-lg bg-[#F3EDE0] p-0.5 text-[11px] font-bold">
                         <button
                           type="button"
-                          disabled={setCodeBusy}
-                          onClick={handleSetApprovalCode}
-                          className="py-1.5 px-3 rounded-xl bg-[#3A453D] hover:bg-[#1C241E] text-white font-bold text-xs shrink-0 disabled:opacity-50"
+                          onClick={() => {
+                            setAdminMode('code');
+                            setAdminUnlockError(null);
+                            setAdminDeleteError(null);
+                          }}
+                          className={`flex-1 py-1 rounded-md transition ${
+                            adminMode === 'code'
+                              ? 'bg-white text-[#157A4C] shadow-2xs'
+                              : 'text-[#556058] hover:text-[#1A241D]'
+                          }`}
                         >
-                          {setCodeBusy ? 'Saving…' : 'Set 6-Digit Code'}
+                          6-Digit Approval
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminMode('owner');
+                            setAdminUnlockError(null);
+                            setAdminDeleteError(null);
+                          }}
+                          className={`flex-1 py-1 rounded-md transition ${
+                            adminMode === 'owner'
+                              ? 'bg-white text-[#157A4C] shadow-2xs'
+                              : 'text-[#556058] hover:text-[#1A241D]'
+                          }`}
+                        >
+                          Owner Admin
                         </button>
                       </div>
-                      {setCodeError && <p className="text-[11px] text-red-600 font-semibold">{setCodeError}</p>}
-                      {setCodeSuccess && <p className="text-[11px] text-[#157A4C] font-semibold">{setCodeSuccess}</p>}
-                      {adminUnlockError && <p className="text-[11px] text-red-600 font-semibold">{adminUnlockError}</p>}
-                      {adminDeleteError && <p className="text-[11px] text-red-600 font-semibold">{adminDeleteError}</p>}
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={adminUnlockBusy || adminDeleteBusy}
-                          onClick={handleAdminUnlock}
-                          className="flex-1 py-1.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs disabled:opacity-50"
-                        >
-                          {adminUnlockBusy ? 'Unlocking…' : 'Unlock Lesson'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={adminUnlockBusy || adminDeleteBusy}
-                          onClick={handleAdminDelete}
-                          className="flex-1 py-1.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold text-xs disabled:opacity-50"
-                        >
-                          {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
-                        </button>
-                      </div>
+
+                      {adminMode === 'code' ? (
+                        <div className="space-y-2">
+                          <label htmlFor="admin-unlock-code" className="block text-[11px] font-bold text-[#1A241D]">
+                            Trusted 6-Digit Approval Number
+                          </label>
+                          <input
+                            id="admin-unlock-code"
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={approvalCodeInput}
+                            onChange={(e) => {
+                              setApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6));
+                              setAdminDeleteError(null);
+                            }}
+                            placeholder="6-digit number"
+                            className="w-full py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
+                          />
+                          {adminDeleteError && <p className="text-[11px] text-red-600 font-semibold">{adminDeleteError}</p>}
+                          <button
+                            type="button"
+                            disabled={adminDeleteBusy}
+                            onClick={handleAdminDelete}
+                            className="w-full py-1.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold text-xs disabled:opacity-50"
+                          >
+                            {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <label htmlFor="admin-unlock-token" className="block text-[11px] font-bold text-[#1A241D]">
+                            Owner Administrator Token
+                          </label>
+                          <input
+                            id="admin-unlock-token"
+                            type="password"
+                            value={adminTokenInput}
+                            onChange={(e) => setAdminTokenInput(e.target.value)}
+                            placeholder="Enter owner admin token"
+                            className="w-full py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs focus:outline-none focus:border-[#157A4C]"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={6}
+                              value={newApprovalCodeInput}
+                              onChange={(e) => setNewApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="Set 6-digit approval code"
+                              className="flex-1 py-1.5 px-2.5 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
+                            />
+                            <button
+                              type="button"
+                              disabled={setCodeBusy}
+                              onClick={handleSetApprovalCode}
+                              className="py-1.5 px-3 rounded-xl bg-[#3A453D] hover:bg-[#1C241E] text-white font-bold text-xs shrink-0 disabled:opacity-50"
+                            >
+                              {setCodeBusy ? 'Saving…' : 'Set 6-Digit Code'}
+                            </button>
+                          </div>
+                          {setCodeError && <p className="text-[11px] text-red-600 font-semibold">{setCodeError}</p>}
+                          {setCodeSuccess && <p className="text-[11px] text-[#157A4C] font-semibold">{setCodeSuccess}</p>}
+                          {adminUnlockError && <p className="text-[11px] text-red-600 font-semibold">{adminUnlockError}</p>}
+                          {adminDeleteError && <p className="text-[11px] text-red-600 font-semibold">{adminDeleteError}</p>}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={adminUnlockBusy || adminDeleteBusy}
+                              onClick={handleAdminUnlock}
+                              className="flex-1 py-1.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs disabled:opacity-50"
+                            >
+                              {adminUnlockBusy ? 'Unlocking…' : 'Unlock Lesson'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={adminUnlockBusy || adminDeleteBusy}
+                              onClick={handleAdminDelete}
+                              className="flex-1 py-1.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold text-xs disabled:opacity-50"
+                            >
+                              {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1533,31 +1698,96 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                         </div>
 
                         {adminMode === 'code' ? (
-                          <div className="space-y-1.5">
+                          <div className="space-y-2">
                             <label htmlFor="trusted-approval-code" className="block text-[11px] font-bold text-[#1A241D]">
                               Trusted 6-Digit Approval Number
                             </label>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                               <input
                                 id="trusted-approval-code"
                                 type="text"
                                 inputMode="numeric"
                                 maxLength={6}
                                 value={approvalCodeInput}
-                                onChange={(e) => setApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                onChange={(e) => {
+                                  setApprovalCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6));
+                                  setIsApprovalCodeVerified(false);
+                                  setVerifyError(null);
+                                  setImageUploadError(null);
+                                  setImageUploadSuccess(null);
+                                  setAdminLockError(null);
+                                  setAdminDeleteError(null);
+                                }}
                                 placeholder="6-digit number"
                                 className="flex-1 py-1.5 px-3 rounded-xl border border-[#DED6C4] text-xs tracking-widest font-mono focus:outline-none focus:border-[#157A4C]"
                               />
+                              {!isApprovalCodeVerified ? (
+                                <button
+                                  type="button"
+                                  disabled={verifyBusy || approvalCodeInput.trim().length !== 6}
+                                  onClick={handleVerifyApprovalCode}
+                                  className="py-1.5 px-3 rounded-xl bg-[#3A453D] hover:bg-[#1C241E] text-white font-bold text-xs shrink-0 disabled:opacity-50"
+                                >
+                                  {verifyBusy ? 'Verifying…' : 'Verify'}
+                                </button>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#157A4C] bg-[#E8F5E9] border border-[#A5D6A7] px-2.5 py-1 rounded-lg shrink-0">
+                                  ✓ Verified
+                                </span>
+                              )}
+                            </div>
+                            {verifyError && <p className="text-[11px] text-red-600 font-semibold">{verifyError}</p>}
+                            {adminLockError && <p className="text-[11px] text-red-600 font-semibold">{adminLockError}</p>}
+                            {adminDeleteError && <p className="text-[11px] text-red-600 font-semibold">{adminDeleteError}</p>}
+
+                            <div className="flex gap-2">
                               <button
                                 type="button"
-                                disabled={adminLockBusy}
+                                disabled={adminLockBusy || adminDeleteBusy}
                                 onClick={handleApproveWithCode}
-                                className="py-1.5 px-3.5 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-xs shrink-0 disabled:opacity-50"
+                                className="flex-1 py-1.5 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-xs disabled:opacity-50"
                               >
                                 {adminLockBusy ? 'Approving…' : 'Approve & Lock'}
                               </button>
+                              <button
+                                type="button"
+                                disabled={adminLockBusy || adminDeleteBusy}
+                                onClick={handleAdminDelete}
+                                className="flex-1 py-1.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-bold text-xs disabled:opacity-50"
+                              >
+                                {adminDeleteBusy ? 'Deleting…' : 'Delete from Drive'}
+                              </button>
                             </div>
-                            {adminLockError && <p className="text-[11px] text-red-600 font-semibold">{adminLockError}</p>}
+
+                            {/* Only after successful verification should the Upload Image button become available */}
+                            {isApprovalCodeVerified && (
+                              <div className="pt-2 border-t border-[#EAE3D2] flex flex-col gap-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-bold text-[#1A241D]">Lesson Image</span>
+                                  <button
+                                    type="button"
+                                    disabled={imageUploadBusy}
+                                    onClick={() => imageInputRef.current?.click()}
+                                    className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] text-white font-bold text-xs transition disabled:opacity-50 shadow-2xs"
+                                  >
+                                    <Upload className="w-3.5 h-3.5" />
+                                    <span>{imageUploadBusy ? 'Uploading to Drive…' : 'Upload Image'}</span>
+                                  </button>
+                                  <input
+                                    ref={imageInputRef}
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    className="hidden"
+                                    onChange={handleImageFileSelect}
+                                  />
+                                </div>
+                                <p className="text-[10px] text-[#556058]">
+                                  Select an image from your phone or computer to replace the lesson image in Google Drive.
+                                </p>
+                                {imageUploadError && <p className="text-[11px] text-red-600 font-semibold">{imageUploadError}</p>}
+                                {imageUploadSuccess && <p className="text-[11px] text-[#157A4C] font-semibold">{imageUploadSuccess}</p>}
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="space-y-1.5">

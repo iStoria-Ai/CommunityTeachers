@@ -79,8 +79,8 @@ function getVerifiedContributor(providedToken, action, payload) {
     }
   }
 
-  // Trusted Approver authorization for admin_lock_entry (Secret Approval Code)
-  if (action === 'admin_lock_entry') {
+  // Trusted Approver authorization for admin_lock_entry, verify_approval_code, admin_upload_lesson_image, admin_delete_entry
+  if (action === 'admin_lock_entry' || action === 'verify_approval_code' || action === 'admin_upload_lesson_image' || action === 'admin_delete_entry') {
     const cache = CacheService.getScriptCache();
     const failAttemptsKey = 'rate_approval_fail_attempts';
     const failedCount = parseInt(cache.get(failAttemptsKey) || '0', 10);
@@ -264,6 +264,7 @@ function sharedLibraryItems(folder) {
     items.push({ id: 'cloud-' + meta.recordingId, sourceLessonId: meta.lessonId,
       recordingId: meta.recordingId, english: english, edoText: spelling || undefined,
       category: category, illustrationKey: 'chat', emoji: '🗣️', hasAudio: hasAudio,
+      imageUrl: meta.imageUrl || undefined,
       cloudAudioFileId: hasAudio ? meta.audioFileId : undefined, cloudMetadataFileId: file.getId(),
       audioDurationSec: Number(meta.durationSec) || 0, isSampleData: false, isCommunity: true,
       syncStatus: 'synced_to_drive', status: hasAudio ? (spelling ? 'awaiting_review' : 'needs_writing') : 'needs_audio',
@@ -341,7 +342,7 @@ function isFileInImagesFolder_(file) {
   while (parents.hasNext()) {
     const parent = parents.next();
     if (parent.getId() === TARGET_FOLDER_ID) return false;
-    if (parent.getName() !== IMAGES_FOLDER_NAME) continue;
+    if (parent.getName() !== IMAGES_FOLDER_NAME && parent.getName() !== 'Images') continue;
     const grandParents = parent.getParents();
     while (grandParents.hasNext()) {
       if (grandParents.next().getId() === TARGET_FOLDER_ID) return true;
@@ -387,10 +388,12 @@ function isFileInStudioFolder(file) {
  */
 function doGet(e) {
   try {
+    const lang = (e && e.parameter && e.parameter.lang) || 'urhobo';
     const folder = DriveApp.getFolderById(TARGET_FOLDER_ID);
     return createJsonResponse({
       status: 'ok',
       service: 'Urhobo Community Teachers Gateway',
+      language: lang,
       folderConnected: true,
       folderName: folder.getName(),
       timestamp: new Date().toISOString()
@@ -448,8 +451,8 @@ function doPost(e) {
     if (!verifiedContributor) {
       return createJsonResponse({
         status: 'error',
-        code: action === 'admin_lock_entry' || action === 'admin_unlock_entry' || action === 'admin_delete_entry' || action === 'admin_set_approval_code' ? 'UNAUTHORIZED_ADMIN' : 'UNAUTHORIZED',
-        message: action === 'admin_lock_entry'
+        code: action === 'admin_lock_entry' || action === 'admin_unlock_entry' || action === 'admin_delete_entry' || action === 'admin_set_approval_code' || action === 'verify_approval_code' || action === 'admin_upload_lesson_image' ? 'UNAUTHORIZED_ADMIN' : 'UNAUTHORIZED',
+        message: (action === 'admin_lock_entry' || action === 'verify_approval_code' || action === 'admin_upload_lesson_image' || action === 'admin_delete_entry')
           ? 'Invalid six-digit approval number or administrator token.'
           : action === 'admin_set_approval_code'
             ? 'Owner administrator token required to set the six-digit approval number.'
@@ -1407,6 +1410,138 @@ function doPost(e) {
       });
     }
 
+    // ACTION F1b: Verify Six-Digit Approval Number or Admin Token
+    if (action === 'verify_approval_code') {
+      if (verifiedContributor.role !== 'admin' && verifiedContributor.role !== 'trusted_approver') {
+        return createJsonResponse({
+          status: 'error',
+          code: 'UNAUTHORIZED_ADMIN',
+          message: 'Invalid six-digit approval number or administrator token.'
+        });
+      }
+      return createJsonResponse({
+        status: 'success',
+        action: 'verify_approval_code',
+        verified: true,
+        role: verifiedContributor.role,
+        message: 'Six-digit approval number verified successfully.'
+      });
+    }
+
+    // ACTION F1c: Admin Upload / Replace Lesson Image (Requires verified 6-digit code or admin token)
+    if (action === 'admin_upload_lesson_image') {
+      if (verifiedContributor.role !== 'admin' && verifiedContributor.role !== 'trusted_approver') {
+        return createJsonResponse({
+          status: 'error',
+          code: 'UNAUTHORIZED_ADMIN',
+          message: 'Six-digit approval number or administrator token required to upload lesson image.'
+        });
+      }
+      const metadataFileId = String(payload.metadataFileId || '').trim();
+      if (!metadataFileId) {
+        return createJsonResponse({ status: 'error', code: 'BAD_REQUEST', message: 'Missing metadataFileId.' });
+      }
+      let metaFile;
+      try {
+        metaFile = DriveApp.getFileById(metadataFileId);
+      } catch (err) {
+        return createJsonResponse({ status: 'error', code: 'NOT_FOUND', message: 'Metadata record not found.' });
+      }
+      if (!isFileInStudioFolder(metaFile) || !metaFile.getName().endsWith('_meta.json')) {
+        return createJsonResponse({ status: 'error', code: 'ACCESS_DENIED', message: 'Record is outside studio collection.' });
+      }
+
+      let meta;
+      try {
+        meta = JSON.parse(metaFile.getBlob().getDataAsString());
+      } catch (e) {
+        return createJsonResponse({ status: 'error', code: 'METADATA_UNREADABLE', message: 'Metadata file is unreadable.' });
+      }
+
+      const rawBase64 = String(payload.imageBase64 || '').replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+      if (!rawBase64) {
+        return createJsonResponse({ status: 'error', code: 'MISSING_IMAGE', message: 'Image data is required.' });
+      }
+
+      let imageBytes;
+      try {
+        imageBytes = Utilities.base64Decode(rawBase64);
+      } catch (_) {
+        return createJsonResponse({ status: 'error', code: 'INVALID_BASE64', message: 'Malformed base64 image data.' });
+      }
+
+      if (!imageBytes || imageBytes.length < 16) {
+        return createJsonResponse({ status: 'error', code: 'EMPTY_IMAGE', message: 'Image content is invalid or empty.' });
+      }
+      if (imageBytes.length > MAX_IMAGE_BYTES) {
+        return createJsonResponse({ status: 'error', code: 'IMAGE_TOO_LARGE', message: 'Image exceeds 2 MB limit.' });
+      }
+
+      const detectedMime = detectImageMime_(imageBytes);
+      if (!detectedMime) {
+        return createJsonResponse({ status: 'error', code: 'NOT_AN_IMAGE', message: 'Uploaded file is not a supported image (JPEG, PNG or WebP).' });
+      }
+
+      const english = String(meta.englishWord || payload.english || '').trim();
+      const normEnglish = normalizedEnglish(english);
+      const imgFolder = getOrCreateImagesFolder_(folder);
+      const baseName = 'lesson_img_' + (normEnglish ? normEnglish.replace(/\s+/g, '_') : meta.lessonId) + '_' + Date.now();
+      const ext = ALLOWED_IMAGE_MIME_TYPES[detectedMime] || 'jpg';
+      const fileName = baseName + '.' + ext;
+
+      const blob = Utilities.newBlob(imageBytes, detectedMime, fileName);
+      const newImageFile = imgFolder.createFile(blob);
+      try {
+        newImageFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (_) {}
+      const fileId = newImageFile.getId();
+      const imageUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w500';
+
+      // Update lesson metadata
+      meta.imageFileId = fileId;
+      meta.imageUrl = imageUrl;
+      meta.imageUploadedAt = new Date().toISOString();
+      meta.imageUploadedBy = verifiedContributor.name || verifiedContributor.role;
+      meta.updatedAt = new Date().toISOString();
+      metaFile.setContent(JSON.stringify(meta, null, 2));
+
+      // Update shared image index if an English word exists
+      if (normEnglish) {
+        let indexFile = findImageIndexFile_(imgFolder);
+        const index = parseImageIndex_(indexFile);
+        index.images[normEnglish] = {
+          normEnglish: normEnglish,
+          english: english,
+          category: meta.category || 'Other',
+          fileId: fileId,
+          fileName: fileName,
+          mimeType: detectedMime,
+          sizeBytes: imageBytes.length,
+          url: imageUrl,
+          sourceUrl: 'manual_admin_upload',
+          license: 'community_contributed',
+          status: 'ready',
+          updatedAt: new Date().toISOString()
+        };
+        index.updatedAt = new Date().toISOString();
+        const indexJson = JSON.stringify(index, null, 2);
+        if (indexFile) {
+          indexFile.setContent(indexJson);
+        } else {
+          indexFile = imgFolder.createFile(Utilities.newBlob(indexJson, 'application/json', IMAGE_INDEX_FILE_NAME));
+        }
+      }
+
+      return createJsonResponse({
+        status: 'success',
+        action: 'admin_upload_lesson_image',
+        fileId: fileId,
+        imageUrl: imageUrl,
+        metadataFileId: metadataFileId,
+        message: 'Lesson image uploaded and saved to Google Drive.'
+      });
+    }
+
     // ACTION F2: Owner Sets Six-Digit Approval Number (Strictly requires owner admin token)
     if (action === 'admin_set_approval_code') {
       if (verifiedContributor.role !== 'admin') {
@@ -1528,11 +1663,11 @@ function doPost(e) {
 
     // ACTION I: Admin Permanent Deletion (Authoritative Cloud Deletion & Tombstone)
     if (action === 'admin_delete_entry') {
-      if (verifiedContributor.role !== 'admin') {
+      if (verifiedContributor.role !== 'admin' && verifiedContributor.role !== 'trusted_approver') {
         return createJsonResponse({
           status: 'error',
           code: 'UNAUTHORIZED_ADMIN',
-          message: 'Admin authorization required to delete contributions.'
+          message: 'Admin authorization or trusted six-digit approval number required to delete contributions.'
         });
       }
       const metadataFileId = String(payload.metadataFileId || '').trim();
@@ -1559,6 +1694,16 @@ function doPost(e) {
       const recordingId = meta.recordingId;
       const audioFileId = meta.audioFileId;
 
+      // Trash lesson image file if present - strictly restricted to studio images folder or studio folder
+      if (meta.imageFileId) {
+        try {
+          const imgFile = DriveApp.getFileById(meta.imageFileId);
+          if (imgFile && (isFileInImagesFolder_(imgFile) || isFileInStudioFolder(imgFile))) {
+            imgFile.setTrashed(true);
+          }
+        } catch (_) {}
+      }
+
       // Trash audio file if present
       if (audioFileId) {
         try {
@@ -1580,7 +1725,15 @@ function doPost(e) {
       } catch (_) {}
       tombstones[recordingId] = {
         lessonId: lessonId,
-        deletedAt: new Date().toISOString()
+        metadataFileId: metadataFileId,
+        deletedAt: new Date().toISOString(),
+        deletedBy: verifiedContributor.name || verifiedContributor.role
+      };
+      tombstones[metadataFileId] = {
+        lessonId: lessonId,
+        recordingId: recordingId,
+        deletedAt: new Date().toISOString(),
+        deletedBy: verifiedContributor.name || verifiedContributor.role
       };
       props.setProperty('DELETED_RECORDS_V1', JSON.stringify(tombstones));
 
