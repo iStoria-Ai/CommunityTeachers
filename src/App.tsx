@@ -65,6 +65,7 @@ import { HelpOthersScreen } from './screens/HelpOthersScreen';
 import { LanguageLibraryScreen } from './screens/LanguageLibraryScreen';
 import { AiProgressScreen } from './screens/AiProgressScreen';
 import { TeachSomethingElseScreen } from './screens/TeachSomethingElseScreen';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 
 function safeUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -822,12 +823,15 @@ export const App: React.FC = () => {
   // Fills the entire available browser viewport without an extra phone frame or cream margins.
   if (isMobileViewport) {
     return (
-      <PhoneFrame
-        screenNumber={currentScreenNumber}
-        isNativeMobileViewport={true}
-      >
-        {renderScreenBySection(activeSection)}
-      </PhoneFrame>
+      <>
+        <PhoneFrame
+          screenNumber={currentScreenNumber}
+          isNativeMobileViewport={true}
+        >
+          {renderScreenBySection(activeSection)}
+        </PhoneFrame>
+        <PWAInstallPrompt />
+      </>
     );
   }
 
@@ -1041,6 +1045,8 @@ export const App: React.FC = () => {
         type="teachers"
         targetUrl={getActiveLanguage().domainUrl}
       />
+
+      <PWAInstallPrompt />
     </div>
   );
 };

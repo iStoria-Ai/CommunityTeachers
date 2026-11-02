@@ -24,6 +24,7 @@ const bundle = buildSync({
       export { getStarterVocabulary } from './src/services/vocabularyService';
       export { getCommunityCacheKey, getSpellingDraftKey, getPendingEditsKey, getCommunityAudioKey } from './src/services/communityLibrary';
       export { getOneTimeResetKey } from './src/services/libraryResetService';
+      export * from './src/services/pwaService';
     `,
     resolveDir: process.cwd(),
     loader: 'ts'
@@ -441,6 +442,141 @@ const ownerUnlock = edoGw.post({ action: 'admin_unlock_entry', authToken: adminO
 assert.equal(ownerUnlock.status, 'success');
 
 console.log('✓ 6-Digit approval code deletion, Trash management, and cross-language isolation verified.');
+
+// --- Test 9: PWA Manifests, Install Invitation, 14-Day Dismissal, Standalone Mode & WhatsApp Previews ---
+console.log('--- Test 9: PWA Manifests, Install Invitation, 14-Day Dismissal & WhatsApp Previews ---');
+
+const edoManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-edo.webmanifest'), 'utf8'));
+const urhManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest-urhobo.webmanifest'), 'utf8'));
+
+assert.equal(edoManifest.name, 'Edo Community Teachers', 'Edo manifest name must be Edo Community Teachers');
+assert.equal(edoManifest.display, 'standalone', 'Edo manifest must launch in standalone mode');
+assert.equal(edoManifest.start_url, '/', 'Edo manifest must specify root start_url');
+assert.ok(edoManifest.icons.some(i => i.src.includes('edo-icon-192.png') && i.sizes === '192x192'));
+assert.ok(edoManifest.icons.some(i => i.src.includes('edo-icon-512.png') && i.sizes === '512x512'));
+
+assert.equal(urhManifest.name, 'Urhobo Community Teachers', 'Urhobo manifest name must be Urhobo Community Teachers');
+assert.equal(urhManifest.display, 'standalone', 'Urhobo manifest must launch in standalone mode');
+assert.equal(urhManifest.start_url, '/', 'Urhobo manifest must specify root start_url');
+assert.ok(urhManifest.icons.some(i => i.src.includes('urhobo-icon-192.png') && i.sizes === '192x192'));
+assert.ok(urhManifest.icons.some(i => i.src.includes('urhobo-icon-512.png') && i.sizes === '512x512'));
+assert.notEqual(edoManifest.id, urhManifest.id, 'Edo and Urhobo PWA manifests must have distinct installation IDs');
+
+// Verify icon assets exist on disk
+for (const iconFile of ['edo-icon-192.png', 'edo-icon-512.png', 'urhobo-icon-192.png', 'urhobo-icon-512.png']) {
+  const iconPath = path.join(__dirname, '../public/assets', iconFile);
+  assert.ok(fs.existsSync(iconPath) && fs.statSync(iconPath).size > 1000, `Missing or empty PWA icon: ${iconFile}`);
+}
+
+// Verify Service Worker is safe pass-through and never caches private recordings or Google Drive data
+const swSource = fs.readFileSync(path.join(__dirname, '../public/sw.js'), 'utf8');
+assert.ok(swSource.includes("self.addEventListener('fetch'"), 'Service worker must register fetch listener for PWA installability');
+assert.ok(!swSource.includes('cache.put(') && !swSource.includes('cache.addAll('), 'Service worker must not cache private recordings, API responses, or outdated bundles');
+
+// Verify HTML & Vite config WhatsApp Open Graph preview support for both languages
+const indexHtml = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+const viteConfig = fs.readFileSync(path.join(__dirname, '../vite.config.ts'), 'utf8');
+assert.ok(indexHtml.includes('property="og:image" content="https://edo.communityteachers.info/assets/edo-welcome-hero.jpg"'));
+assert.ok(indexHtml.includes('manifest-edo.webmanifest'));
+assert.ok(viteConfig.includes('assets/urhobo-welcome-hero.jpg'), 'Vite config must transform og:image for Urhobo builds');
+assert.ok(viteConfig.includes('manifest-urhobo.webmanifest'), 'Vite config must transform manifest for Urhobo builds');
+
+// Verify platform detection (Android vs iPhone/iOS)
+assert.equal(api.detectMobilePlatform('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'), 'ios');
+assert.equal(api.detectMobilePlatform('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'), 'android');
+assert.equal(api.isSafariOnIOS('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1'), true);
+assert.equal(api.isSafariOnIOS('Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) CriOS/124.0.6367.88 Mobile/15E148 Safari/604.1'), false);
+
+// Verify Standalone Mode suppression
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'edo',
+    ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)',
+    win: { matchMedia: (q) => ({ matches: q === '(display-mode: standalone)' }) }
+  }),
+  false,
+  'Invitation must NOT appear when running in standalone mode'
+);
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'urhobo',
+    ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)',
+    win: {},
+    nav: { standalone: true }
+  }),
+  false,
+  'Invitation must NOT appear when navigator.standalone is true on iOS'
+);
+
+// Verify 14-day dismissal cooldown (isolated per language, expires after 14 days, no permanent installation flag)
+api.clearInstallPromptDismissal('edo');
+api.clearInstallPromptDismissal('urhobo');
+const baseTime = 1700000000000;
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'edo',
+    ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+    now: baseTime,
+    win: {}
+  }),
+  true,
+  'Invitation must appear initially on mobile phone'
+);
+
+api.dismissInstallPrompt('edo', baseTime);
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'edo',
+    ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+    now: baseTime + 7 * 24 * 60 * 60 * 1000, // 7 days later
+    win: {}
+  }),
+  false,
+  'Invitation must stay dismissed during the 14-day window'
+);
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'urhobo',
+    ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+    now: baseTime + 1000,
+    win: {}
+  }),
+  true,
+  'Dismissing Edo prompt must not suppress Urhobo prompt'
+);
+assert.equal(
+  api.shouldShowInstallInvitation({
+    storagePrefix: 'edo',
+    ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)',
+    now: baseTime + 14 * 24 * 60 * 60 * 1000 + 1000, // After 14 days
+    win: {}
+  }),
+  true,
+  'Invitation must reappear after the 14-day dismissal window expires'
+);
+api.clearInstallPromptDismissal('edo');
+
+// Verify Android native prompt trigger
+let promptCalled = false;
+api.setDeferredInstallPromptForTest({
+  prompt: async () => { promptCalled = true; },
+  userChoice: Promise.resolve({ outcome: 'accepted', platform: 'web' })
+});
+assert.equal(api.hasDeferredInstallPrompt(), true);
+api.triggerNativeInstallPrompt('edo').then((outcome) => {
+  assert.equal(promptCalled, true);
+  assert.equal(outcome, 'accepted');
+  api.setDeferredInstallPromptForTest(null);
+});
+
+// Verify PWAInstallPrompt UI component source includes honest iOS instructions and Android Install App button
+const pwaComponentSource = fs.readFileSync(path.join(__dirname, '../src/components/PWAInstallPrompt.tsx'), 'utf8');
+assert.ok(pwaComponentSource.includes('Add to Home Screen'), 'iOS prompt must instruct Add to Home Screen');
+assert.ok(pwaComponentSource.includes('Open as Web App'), 'iOS prompt must mention Open as Web App');
+assert.ok(pwaComponentSource.includes('Install App'), 'Android prompt must render Install App button');
+assert.ok(!/automatic(ally)?\s+install/i.test(pwaComponentSource), 'Must never claim automatic installation on iPhone');
+
+console.log('✓ PWA manifests, platform detection, 14-day dismissal, standalone mode suppression, and WhatsApp previews verified.');
 
 // Reset to Edo at end
 api.setActiveLanguage('edo');
