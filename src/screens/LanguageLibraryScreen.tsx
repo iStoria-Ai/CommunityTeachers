@@ -23,7 +23,7 @@ import { WordIllustration } from '../components/WordIllustration';
 import { EdoLetterBar } from '../components/EdoLetterBar';
 import { QRCodeModal } from '../components/QRCodeModal';
 import { getActiveLanguage } from '../languages';
-import { playAudioRecording, stopActivePlayback, MicrophoneRecorder, invalidateSessionAudio, createPrimedAudioElement, getCachedSessionAudio } from '../services/audioService';
+import { playAudioRecording, stopActivePlayback, MicrophoneRecorder, releaseMicrophoneStream, invalidateSessionAudio, createPrimedAudioElement, getCachedSessionAudio } from '../services/audioService';
 import {
   getCommunityAudio,
   updateOwnedRecordingPermissions,
@@ -185,6 +185,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   onLibraryChanged,
   onEditText,
   onSaveEntry,
+  onDeleteLesson,
   onBackToDashboard
 }) => {
   const lang = getActiveLanguage();
@@ -214,6 +215,8 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   const [newAudioDataUrl, setNewAudioDataUrl] = useState<string | null>(null);
   const [newAudioDuration, setNewAudioDuration] = useState<number>(0);
   const [isRecordingNewVoice, setIsRecordingNewVoice] = useState(false);
+  const [isStartingMic, setIsStartingMic] = useState(false);
+  const isStartingMicRef = useRef(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -236,6 +239,8 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
   const [adminLockError, setAdminLockError] = useState<string | null>(null);
   const [adminDeleteBusy, setAdminDeleteBusy] = useState(false);
   const [adminDeleteError, setAdminDeleteError] = useState<string | null>(null);
+  const deleteInFlightRef = useRef(false);
+  const [confirmedDeletedIds, setConfirmedDeletedIds] = useState<Set<string>>(() => new Set());
   const [setCodeBusy, setSetCodeBusy] = useState(false);
   const [setCodeError, setSetCodeError] = useState<string | null>(null);
   const [setCodeSuccess, setSetCodeSuccess] = useState<string | null>(null);
@@ -263,6 +268,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       if (timerRef.current) window.clearInterval(timerRef.current);
       if (feedbackTimerRef.current) window.clearTimeout(feedbackTimerRef.current);
       if (recorderRef.current) recorderRef.current.cancel();
+      releaseMicrophoneStream();
     };
   }, []);
 
@@ -377,6 +383,7 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
       recorderRef.current.cancel();
       if (timerRef.current) window.clearInterval(timerRef.current);
     }
+    releaseMicrophoneStream();
     setSelectedEntry(null);
     setIsApprovalCodeVerified(false);
     setVerifyBusy(false);
@@ -386,8 +393,15 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     setImageUploadSuccess(null);
   };
 
-  // Requirement 3: Only completed lessons appear in learning Library
-  const completedEntries = entries.filter(entry => isCompletedLesson(entry) && (!readOnly || entry.playbackPermission === 'granted'));
+  // Requirement 3: Only completed lessons appear in learning Library (excluding backend-confirmed deleted lessons)
+  const completedEntries = entries.filter(
+    entry =>
+      isCompletedLesson(entry) &&
+      (!readOnly || entry.playbackPermission === 'granted') &&
+      !confirmedDeletedIds.has(entry.id) &&
+      !(entry.cloudMetadataFileId && confirmedDeletedIds.has(entry.cloudMetadataFileId)) &&
+      !(entry.recordingId && confirmedDeletedIds.has(entry.recordingId))
+  );
 
   let visibleEntries = completedEntries.filter((entry) => {
     if (activeFilter === 'new') {
@@ -606,25 +620,34 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
 
   // Start recording replacement voice
   const handleStartRecording = async () => {
-    stopActivePlayback();
-    setModalError(null);
-    setNewAudioDataUrl(null);
-    setNewAudioDuration(0);
+    if (isStartingMicRef.current || isRecordingNewVoice) return;
+    isStartingMicRef.current = true;
+    setIsStartingMic(true);
+    try {
+      stopActivePlayback();
+      setModalError(null);
+      setNewAudioDataUrl(null);
+      setNewAudioDuration(0);
 
-    const recorder = new MicrophoneRecorder();
-    recorderRef.current = recorder;
-    const startResult = await recorder.start();
-    if (!startResult.ok) {
-      setModalError(startResult.errorMessage || 'Unable to access microphone.');
-      return;
+      const recorder = new MicrophoneRecorder();
+      recorderRef.current = recorder;
+      const startResult = await recorder.start();
+      if (!startResult.ok) {
+        recorderRef.current = null;
+        setModalError(startResult.errorMessage || 'Unable to access microphone.');
+        return;
+      }
+
+      setIsRecordingNewVoice(true);
+      setRecordingSeconds(0);
+      const startTime = Date.now();
+      timerRef.current = window.setInterval(() => {
+        setRecordingSeconds(Math.floor((Date.now() - startTime) / 1000));
+      }, 200);
+    } finally {
+      isStartingMicRef.current = false;
+      setIsStartingMic(false);
     }
-
-    setIsRecordingNewVoice(true);
-    setRecordingSeconds(0);
-    const startTime = Date.now();
-    timerRef.current = window.setInterval(() => {
-      setRecordingSeconds(Math.floor((Date.now() - startTime) / 1000));
-    }, 200);
   };
 
   // Stop recording replacement voice — auto-plays once immediately
@@ -851,35 +874,56 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
     }
   };
 
-  // Admin delete submission (Permanently remove from Google Drive)
+  // Admin delete submission (Move lesson files to Google Drive Trash directly upon valid credential)
   const handleAdminDelete = async () => {
+    if (deleteInFlightRef.current || adminDeleteBusy) return;
     if (!selectedEntry || !selectedEntry.cloudMetadataFileId) return;
     const credential = adminMode === 'code' ? approvalCodeInput.trim() : adminTokenInput.trim();
     if (!credential) {
       setAdminDeleteError(adminMode === 'code' ? 'Please enter the 6-digit approval number.' : 'Please enter your administrator credential.');
       return;
     }
-    const confirmed = typeof window !== 'undefined'
-      ? window.confirm(`Permanently delete "${selectedEntry.english}" from Google Drive? This will move the lesson files to Trash and cannot be undone.`)
-      : true;
-    if (!confirmed) return;
 
+    const targetEntry = selectedEntry;
+    const targetMetaId = selectedEntry.cloudMetadataFileId;
+    const targetEnglish = selectedEntry.english;
+
+    deleteInFlightRef.current = true;
     setAdminDeleteBusy(true);
     setAdminDeleteError(null);
     try {
-      const res = await adminDeleteEntry(selectedEntry.cloudMetadataFileId, credential);
+      const res = await adminDeleteEntry(targetMetaId, credential);
       if (res.ok) {
-        if (selectedEntry.cloudAudioFileId) {
-          invalidateSessionAudio(selectedEntry.cloudAudioFileId);
+        if (targetEntry.cloudAudioFileId) {
+          invalidateSessionAudio(targetEntry.cloudAudioFileId);
         }
-        if (onLibraryChanged) await onLibraryChanged();
+        // Only remove from visible library after backend confirms successful deletion
+        setConfirmedDeletedIds((prev) => {
+          const next = new Set(prev);
+          next.add(targetEntry.id);
+          next.add(targetMetaId);
+          if (targetEntry.recordingId) next.add(targetEntry.recordingId);
+          return next;
+        });
         handleCloseModal();
+        setTransientFeedback(`Deleted "${targetEnglish}" from Google Drive.`);
+        if (onDeleteLesson) {
+          try {
+            await onDeleteLesson(targetEntry.id);
+          } catch {
+            // Ignore local cleanup warning
+          }
+        }
+        if (onLibraryChanged) {
+          await onLibraryChanged();
+        }
       } else {
         setAdminDeleteError(res.message || 'Deletion failed. Invalid code or token.');
       }
     } catch (err: any) {
       setAdminDeleteError(String(err?.message || err));
     } finally {
+      deleteInFlightRef.current = false;
       setAdminDeleteBusy(false);
     }
   };
@@ -1616,11 +1660,12 @@ export const LanguageLibraryScreen: React.FC<LanguageLibraryScreenProps> = ({
                     ) : (
                       <button
                         type="button"
+                        disabled={isStartingMic}
                         onClick={handleStartRecording}
-                        className="flex-1 py-2 px-3 rounded-xl bg-[#F3EDE0] hover:bg-[#EAE0CD] text-[#3A453D] font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                        className="flex-1 py-2 px-3 rounded-xl bg-[#F3EDE0] hover:bg-[#EAE0CD] text-[#3A453D] font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-60"
                       >
                         <Mic className="w-3.5 h-3.5 text-[#157A4C]" />
-                        <span>{newAudioDataUrl ? 'Record Again' : 'Replace Voice'}</span>
+                        <span>{isStartingMic ? 'Starting…' : newAudioDataUrl ? 'Record Again' : 'Replace Voice'}</span>
                       </button>
                     )}
                   </div>

@@ -805,6 +805,75 @@ let recordingStartHandler: (() => void) | null = null;
 let recordingStopHandler: (() => void) | null = null;
 let audioInvalidationHandler: ((key: string) => void) | null = null;
 
+// Reusable microphone stream kept alive while the user remains on an active recording screen.
+// Prevents repeated getUserMedia() prompts/notifications on iPhone Safari for every word,
+// while releasing hardware tracks immediately when leaving the screen or backgrounding the app.
+let sharedMicrophoneStream: MediaStream | null = null;
+let lifecycleListenersRegistered = false;
+
+export function isMicrophoneStreamReusable(stream: MediaStream | null): stream is MediaStream {
+  if (!stream) return false;
+  if (typeof stream.active === 'boolean' && !stream.active) return false;
+  try {
+    const tracks =
+      typeof stream.getAudioTracks === 'function'
+        ? stream.getAudioTracks()
+        : typeof stream.getTracks === 'function'
+        ? stream.getTracks()
+        : [];
+    if (!tracks || tracks.length === 0) return false;
+    return tracks.some(
+      (t) => (t.readyState === undefined || t.readyState === 'live') && t.enabled !== false
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Explicitly stops and releases the active microphone MediaStream tracks.
+ * Called when leaving a recording screen, closing a recording modal, or backgrounding the app.
+ */
+export function releaseMicrophoneStream(): void {
+  if (!sharedMicrophoneStream) return;
+  const streamToStop = sharedMicrophoneStream;
+  sharedMicrophoneStream = null;
+  try {
+    const tracks =
+      typeof streamToStop.getTracks === 'function'
+        ? streamToStop.getTracks()
+        : typeof streamToStop.getAudioTracks === 'function'
+        ? streamToStop.getAudioTracks()
+        : [];
+    tracks.forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        // Ignore track stop error
+      }
+    });
+  } catch {
+    // Ignore stream release error
+  }
+}
+
+function ensureStreamLifecycleListeners(): void {
+  if (lifecycleListenersRegistered) return;
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  lifecycleListenersRegistered = true;
+
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        releaseMicrophoneStream();
+      }
+    });
+  }
+  window.addEventListener('pagehide', () => {
+    releaseMicrophoneStream();
+  });
+}
+
 export function setRecordingLifecycleHandlers(onStart: () => void, onStop: () => void): void {
   recordingStartHandler = onStart;
   recordingStopHandler = onStop;
@@ -813,6 +882,14 @@ export function setRecordingLifecycleHandlers(onStart: () => void, onStop: () =>
 export function setAudioInvalidationHandler(handler: (key: string) => void): void {
   audioInvalidationHandler = handler;
 }
+
+const DEFAULT_AUDIO_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  }
+};
 
 export class MicrophoneRecorder {
   private mediaRecorder: MediaRecorder | null = null;
@@ -828,6 +905,92 @@ export class MicrophoneRecorder {
   private peakRms = 0;
   private peakAmplitude = 0;
   private analyserSamplesCount = 0;
+
+  private mapGetUserMediaError(err: unknown): RecordingStartResult {
+    this.cleanupResources(true);
+    const domErr = err as { name?: string; message?: string };
+    const errName = domErr?.name || '';
+
+    if (
+      errName === 'NotAllowedError' ||
+      errName === 'PermissionDeniedError' ||
+      errName === 'SecurityError'
+    ) {
+      return {
+        ok: false,
+        errorCode: 'permission_denied',
+        errorMessage:
+          'Microphone access was denied. Please allow microphone permission in your browser settings and tap the microphone to try again.'
+      };
+    }
+
+    if (
+      errName === 'NotFoundError' ||
+      errName === 'DevicesNotFoundError' ||
+      errName === 'NotReadableError' ||
+      errName === 'TrackStartError'
+    ) {
+      return {
+        ok: false,
+        errorCode: 'no_microphone',
+        errorMessage:
+          'No working microphone was detected, or it is in use by another app. Please check your microphone and try again.'
+      };
+    }
+
+    return {
+      ok: false,
+      errorCode: 'recording_failed',
+      errorMessage:
+        'Could not start microphone recording. Please check your microphone permissions and try again.'
+    };
+  }
+
+  private async acquireStream(forceNew = false): Promise<MediaStream> {
+    ensureStreamLifecycleListeners();
+    if (!forceNew && isMicrophoneStreamReusable(sharedMicrophoneStream)) {
+      return sharedMicrophoneStream;
+    }
+    releaseMicrophoneStream();
+    const freshStream = await navigator.mediaDevices.getUserMedia(DEFAULT_AUDIO_CONSTRAINTS);
+    sharedMicrophoneStream = freshStream;
+    try {
+      const tracks =
+        typeof freshStream.getTracks === 'function' ? freshStream.getTracks() : [];
+      tracks.forEach((t) => {
+        if (typeof t.addEventListener === 'function') {
+          t.addEventListener('ended', () => {
+            if (sharedMicrophoneStream === freshStream && !isMicrophoneStreamReusable(freshStream)) {
+              sharedMicrophoneStream = null;
+            }
+          });
+        }
+      });
+    } catch {
+      // Ignore track listener attachment errors
+    }
+    return freshStream;
+  }
+
+  private initializeMediaRecorder(stream: MediaStream): void {
+    this.chosenMimeType = getSupportedRecordingMimeType();
+    this.mediaRecorder = this.chosenMimeType
+      ? new MediaRecorder(stream, { mimeType: this.chosenMimeType })
+      : new MediaRecorder(stream);
+
+    this.mediaRecorder.ondataavailable = (e: BlobEvent) => {
+      if (e.data && e.data.size > 0) {
+        this.chunks.push(e.data);
+      }
+    };
+
+    // Attach Web Audio API AnalyserNode to monitor microphone input levels
+    this.startAudioLevelMonitor(stream);
+
+    this.startTime = Date.now();
+    // Start recording (250ms timeslice ensures periodic chunk collection across Chrome & iOS Safari)
+    this.mediaRecorder.start(250);
+  }
 
   async start(): Promise<RecordingStartResult> {
     this.chunks = [];
@@ -863,78 +1026,43 @@ export class MicrophoneRecorder {
       };
     }
 
+    const hadReusableStream = isMicrophoneStreamReusable(sharedMicrophoneStream);
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+      this.stream = await this.acquireStream(false);
     } catch (err: unknown) {
-      this.cleanupResources();
-      const domErr = err as { name?: string; message?: string };
-      const errName = domErr?.name || '';
-
-      if (
-        errName === 'NotAllowedError' ||
-        errName === 'PermissionDeniedError' ||
-        errName === 'SecurityError'
-      ) {
-        return {
-          ok: false,
-          errorCode: 'permission_denied',
-          errorMessage:
-            'Microphone access was denied. Please allow microphone permission in your browser settings and tap the microphone to try again.'
-        };
-      }
-
-      if (
-        errName === 'NotFoundError' ||
-        errName === 'DevicesNotFoundError' ||
-        errName === 'NotReadableError' ||
-        errName === 'TrackStartError'
-      ) {
-        return {
-          ok: false,
-          errorCode: 'no_microphone',
-          errorMessage:
-            'No working microphone was detected, or it is in use by another app. Please check your microphone and try again.'
-        };
-      }
-
-      return {
-        ok: false,
-        errorCode: 'recording_failed',
-        errorMessage:
-          'Could not start microphone recording. Please check your microphone permissions and try again.'
-      };
+      return this.mapGetUserMediaError(err);
     }
 
     try {
-      this.chosenMimeType = getSupportedRecordingMimeType();
-      this.mediaRecorder = this.chosenMimeType
-        ? new MediaRecorder(this.stream, { mimeType: this.chosenMimeType })
-        : new MediaRecorder(this.stream);
-
-      this.mediaRecorder.ondataavailable = (e: BlobEvent) => {
-        if (e.data && e.data.size > 0) {
-          this.chunks.push(e.data);
-        }
-      };
-
-      // Attach Web Audio API AnalyserNode to monitor microphone input levels
-      this.startAudioLevelMonitor(this.stream);
-
-      this.startTime = Date.now();
-      // Start recording (250ms timeslice ensures periodic chunk collection across Chrome & iOS Safari)
-      this.mediaRecorder.start(250);
+      this.initializeMediaRecorder(this.stream);
       recordingStartHandler?.();
-
       return { ok: true };
-    } catch (err) {
-      console.error('Failed to initialize MediaRecorder:', err);
-      this.cleanupResources();
+    } catch (firstErr) {
+      // If a reused stream failed to initialize MediaRecorder (e.g. invalidated by OS),
+      // release it and retry once with a fresh getUserMedia() stream.
+      this.cleanupResources(true);
+      if (hadReusableStream) {
+        try {
+          this.stream = await this.acquireStream(true);
+        } catch (err: unknown) {
+          return this.mapGetUserMediaError(err);
+        }
+        try {
+          this.initializeMediaRecorder(this.stream);
+          recordingStartHandler?.();
+          return { ok: true };
+        } catch (retryErr) {
+          console.error('Failed to initialize MediaRecorder on fresh stream:', retryErr);
+          this.cleanupResources(true);
+          return {
+            ok: false,
+            errorCode: 'recording_failed',
+            errorMessage: 'Unable to start audio recorder on this device. Please try again.'
+          };
+        }
+      }
+
+      console.error('Failed to initialize MediaRecorder:', firstErr);
       return {
         ok: false,
         errorCode: 'recording_failed',
@@ -1199,7 +1327,7 @@ export class MicrophoneRecorder {
     this.cleanupResources();
   }
 
-  private cleanupResources(): void {
+  private cleanupResources(releaseStream = false): void {
     if (this.levelIntervalId !== null) {
       window.clearInterval(this.levelIntervalId);
       this.levelIntervalId = null;
@@ -1213,16 +1341,23 @@ export class MicrophoneRecorder {
       }
       this.audioContext = null;
     }
-    if (this.stream) {
-      this.stream.getTracks().forEach((t) => {
+    if (releaseStream) {
+      if (this.stream && this.stream !== sharedMicrophoneStream) {
         try {
-          t.stop();
+          this.stream.getTracks().forEach((t) => {
+            try {
+              t.stop();
+            } catch {
+              // Ignore track stop error
+            }
+          });
         } catch {
-          // Ignore track stop error
+          // Ignore track iteration error
         }
-      });
-      this.stream = null;
+      }
+      releaseMicrophoneStream();
     }
+    this.stream = null;
     this.mediaRecorder = null;
     recordingStopHandler?.();
   }

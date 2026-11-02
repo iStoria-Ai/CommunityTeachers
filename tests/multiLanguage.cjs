@@ -578,6 +578,162 @@ assert.ok(!/automatic(ally)?\s+install/i.test(pwaComponentSource), 'Must never c
 
 console.log('✓ PWA manifests, platform detection, 14-day dismissal, standalone mode suppression, and WhatsApp previews verified.');
 
+// --- Test 10: Mobile Settings Modal, Microphone Stream Reuse & Direct Deletion ---
+console.log('--- Test 10: Mobile Settings Modal, Microphone Stream Reuse & Direct Deletion ---');
+
+// 10a: Verify App.tsx renders renderSystemModals() in both mobile and desktop viewports
+const appSource = fs.readFileSync(path.join(__dirname, '../src/App.tsx'), 'utf8');
+const mobileBranchIdx = appSource.indexOf('if (isMobileViewport)');
+const desktopBranchIdx = appSource.indexOf('// 2. Desktop Web Presentation');
+assert.ok(mobileBranchIdx !== -1 && desktopBranchIdx !== -1, 'Mobile and desktop branches must exist in App.tsx');
+const mobileBranchCode = appSource.slice(mobileBranchIdx, desktopBranchIdx);
+assert.ok(mobileBranchCode.includes('renderSystemModals()'), 'Mobile viewport return block must render renderSystemModals() so Settings opens on phones');
+console.log('✓ Mobile Settings modal and QR modal rendering verified in App.tsx.');
+
+// 10b: Verify MicrophoneRecorder stream reuse and release lifecycle
+{
+  const audioBundle = buildSync({
+    stdin: {
+      contents: `export { MicrophoneRecorder, isMicrophoneStreamReusable, releaseMicrophoneStream } from './src/services/audioService';`,
+      resolveDir: path.join(__dirname, '..'),
+      loader: 'ts'
+    },
+    bundle: true,
+    write: false,
+    platform: 'node',
+    format: 'cjs',
+    external: ['@capacitor/*']
+  }).outputFiles[0].text;
+
+  let getUserMediaCalls = 0;
+  let trackStops = 0;
+  let visibilityCallback = null;
+  const mockDoc = {
+    visibilityState: 'visible',
+    addEventListener: (evt, fn) => {
+      if (evt === 'visibilitychange') visibilityCallback = fn;
+    }
+  };
+  const mockWin = {
+    setTimeout,
+    clearTimeout,
+    setInterval: () => 1,
+    clearInterval: () => {},
+    addEventListener: () => {}
+  };
+  const mockNav = {
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Version/17.4 Mobile/15E148 Safari/604.1',
+    mediaDevices: {
+      getUserMedia: async () => {
+        getUserMediaCalls++;
+        const track = {
+          readyState: 'live',
+          enabled: true,
+          stop() {
+            this.readyState = 'ended';
+            trackStops++;
+          },
+          addEventListener() {}
+        };
+        return {
+          active: true,
+          getTracks: () => [track],
+          getAudioTracks: () => [track]
+        };
+      }
+    }
+  };
+  class MockMediaRecorder {
+    static isTypeSupported(mime) { return mime === 'audio/mp4'; }
+    constructor(stream, opts) {
+      this.stream = stream;
+      this.mimeType = opts?.mimeType || 'audio/mp4';
+      this.state = 'inactive';
+      this.ondataavailable = null;
+      this.onstop = null;
+    }
+    start() {
+      this.state = 'recording';
+    }
+    requestData() {}
+    stop() {
+      this.state = 'inactive';
+      if (this.onstop) this.onstop();
+    }
+  }
+
+  const audioMod = { exports: {} };
+  vm.runInNewContext(audioBundle, {
+    module: audioMod,
+    exports: audioMod.exports,
+    console,
+    window: mockWin,
+    document: mockDoc,
+    navigator: mockNav,
+    MediaRecorder: MockMediaRecorder,
+    Blob,
+    URL: { createObjectURL: () => 'blob:mock', revokeObjectURL: () => {} }
+  });
+
+  (async () => {
+    const { MicrophoneRecorder, releaseMicrophoneStream } = audioMod.exports;
+
+    // First recording requests microphone permission once
+    const rec1 = new MicrophoneRecorder();
+    const res1 = await rec1.start();
+    assert.equal(res1.ok, true);
+    assert.equal(getUserMediaCalls, 1, 'First recording calls getUserMedia once');
+    rec1.cancel();
+    assert.equal(trackStops, 0, 'Stopping a recording must keep stream alive while on recording screen');
+
+    // Second recording on the same screen reuses active stream without calling getUserMedia again
+    const rec2 = new MicrophoneRecorder();
+    const res2 = await rec2.start();
+    assert.equal(res2.ok, true);
+    assert.equal(getUserMediaCalls, 1, 'Second recording reuses active stream (0 extra getUserMedia calls)');
+    rec2.cancel();
+
+    // Leaving the recording screen releases the microphone hardware tracks
+    releaseMicrophoneStream();
+    assert.equal(trackStops, 1, 'releaseMicrophoneStream stops hardware audio track');
+
+    // Returning to a recording screen acquires a fresh stream cleanly
+    const rec3 = new MicrophoneRecorder();
+    const res3 = await rec3.start();
+    assert.equal(res3.ok, true);
+    assert.equal(getUserMediaCalls, 2, 'Recording after screen exit acquires a fresh stream');
+    rec3.cancel();
+
+    // Backgrounding the app (visibilityState === 'hidden') automatically releases the microphone
+    if (visibilityCallback) {
+      mockDoc.visibilityState = 'hidden';
+      visibilityCallback();
+      assert.equal(trackStops, 2, 'Backgrounding app automatically stops microphone track');
+    }
+    console.log('✓ Microphone stream reuse across recordings and release on screen exit/background verified.');
+  })();
+}
+
+// 10c: Verify TeachEdoScreen does not block recording start on fetchAnsweredQuestions network call
+const teachSource = fs.readFileSync(path.join(__dirname, '../src/screens/TeachEdoScreen.tsx'), 'utf8');
+const toggleRecIdx = teachSource.indexOf('const handleToggleRecording = async () =>');
+const playRecIdx = teachSource.indexOf('const handlePlayRecordedAudio = () =>');
+assert.ok(toggleRecIdx !== -1 && playRecIdx !== -1);
+const toggleRecBody = teachSource.slice(toggleRecIdx, playRecIdx);
+assert.ok(!toggleRecBody.includes('await fetchAnsweredQuestions()'), 'handleToggleRecording must not block microphone start on network fetch');
+assert.ok(teachSource.includes('releaseMicrophoneStream()'), 'TeachEdoScreen must release microphone stream on unmount');
+
+// 10d: Verify direct deletion in LanguageLibraryScreen without window.confirm popup
+const libScreenSource = fs.readFileSync(path.join(__dirname, '../src/screens/LanguageLibraryScreen.tsx'), 'utf8');
+const adminDelIdx = libScreenSource.indexOf('const handleAdminDelete = async () =>');
+const verifyCodeIdx = libScreenSource.indexOf('const handleVerifyApprovalCode = async () =>');
+assert.ok(adminDelIdx !== -1 && verifyCodeIdx !== -1);
+const adminDelBody = libScreenSource.slice(adminDelIdx, verifyCodeIdx);
+assert.ok(!adminDelBody.includes('window.confirm'), 'handleAdminDelete must not open browser window.confirm popup');
+assert.ok(adminDelBody.includes('deleteInFlightRef.current'), 'handleAdminDelete must guard against duplicate double-tap requests');
+assert.ok(adminDelBody.includes('if (res.ok)') && adminDelBody.indexOf('setConfirmedDeletedIds') > adminDelBody.indexOf('if (res.ok)'), 'Lesson must only be removed after backend confirms res.ok');
+console.log('✓ Direct deletion without extra confirmation popup and backend-confirmed removal verified.');
+
 // Reset to Edo at end
 api.setActiveLanguage('edo');
 console.log('\n=== ALL MULTI-LANGUAGE ARCHITECTURE TESTS PASSED ===\n');

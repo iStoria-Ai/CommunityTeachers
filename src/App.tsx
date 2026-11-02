@@ -817,6 +817,120 @@ export const App: React.FC = () => {
     }
   };
 
+  const renderSystemModals = () => (
+    <>
+      {/* System Architecture & Prototype Status Modal */}
+      {showSystemModal && (
+        <div
+          onClick={() => setShowSystemModal(false)}
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-3xl bg-[#FAF7F0] border border-[#DED5C3] p-5 sm:p-6 shadow-2xl text-[#1C241E]"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5DEC9]">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full overflow-hidden bg-[#EAE2D0] border border-[#D5CCB8] flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-[#157A4C] font-serif">
+                    {getActiveLanguage().name.charAt(0)}
+                  </span>
+                </div>
+                <h2 className="text-[17px] sm:text-[19px] font-bold truncate">
+                  {getActiveLanguage().name} Community Teachers — Info
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close settings"
+                onClick={() => setShowSystemModal(false)}
+                className="w-8 h-8 rounded-full bg-[#EFE9DA] flex items-center justify-center shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-[13.5px] leading-relaxed">
+              {/* Community Teachers QR Code Action Card in Settings */}
+              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-[#E6F4ED] border border-[#C2E4D2] flex items-center justify-center text-[#157A4C] shrink-0">
+                    <QrCode className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[13.5px] font-bold text-[#1A241D] leading-tight">
+                      {getActiveLanguage().name} Community Teachers
+                    </span>
+                    <span className="text-[11.5px] text-[#556358] truncate mt-0.5 font-mono">
+                      {getActiveLanguage().domainUrl}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTeachersQrModal(true)}
+                  className="py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] active:scale-95 text-white text-xs font-bold shrink-0 transition flex items-center gap-1.5 shadow-2xs"
+                  title="Open Community Teachers QR Code"
+                  aria-label="Open Community Teachers QR Code"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Show QR</span>
+                </button>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5">
+                <h3 className="font-bold text-[#157A4C] flex items-center gap-1.5 mb-1">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Community Language Preservation Prototype</span>
+                </h3>
+                <p className="text-[#3C473F] text-[12.5px]">
+                  Community Teachers helps speakers record and write {getActiveLanguage().name} words and phrases. Recordings and text are stored locally on your device.
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5">
+                <h3 className="font-bold text-[#6E4BC3] flex items-center gap-1.5 mb-1">
+                  <Database className="w-4 h-4" />
+                  <span>Sample &amp; Local Data</span>
+                </h3>
+                <p className="text-[#3C473F] text-[12.5px]">
+                  Initial library words are marked <strong>Sample</strong> until community review is connected. You have added {stats.localContributionsCount} local contributions on this device.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleResetData}
+                className="px-4 py-2.5 rounded-xl bg-white border border-[#D8CFC0] hover:bg-[#F3EDE0] text-[#3A453D] text-[13px] font-bold flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Reset Lesson List</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowSystemModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-[#157A4C] text-white text-[13.5px] font-bold"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Community Teachers Homepage QR Code Modal */}
+      <QRCodeModal
+        isOpen={showTeachersQrModal}
+        onClose={() => setShowTeachersQrModal(false)}
+        type="teachers"
+        targetUrl={getActiveLanguage().domainUrl}
+      />
+    </>
+  );
+
   if (!isLoaded) return <div className="p-6" role="status">{storageError || 'Loading your language library…'}</div>;
 
   // 1. Mobile Presentation (<= 640px):
@@ -830,6 +944,7 @@ export const App: React.FC = () => {
         >
           {renderScreenBySection(activeSection)}
         </PhoneFrame>
+        {renderSystemModals()}
         <PWAInstallPrompt />
       </>
     );
@@ -937,114 +1052,7 @@ export const App: React.FC = () => {
         </main>
       )}
 
-      {/* System Architecture & Prototype Status Modal */}
-      {showSystemModal && (
-        <div
-          onClick={() => setShowSystemModal(false)}
-          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg rounded-3xl bg-[#FAF7F0] border border-[#DED5C3] p-6 shadow-2xl text-[#1C241E]"
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-[#E5DEC9]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full overflow-hidden bg-[#EAE2D0] border border-[#D5CCB8] flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-[#157A4C] font-serif">
-                    {getActiveLanguage().name.charAt(0)}
-                  </span>
-                </div>
-                <h2 className="text-[19px] font-bold">
-                  {getActiveLanguage().name} Community Teachers — Info
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSystemModal(false)}
-                className="w-8 h-8 rounded-full bg-[#EFE9DA] flex items-center justify-center"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3 text-[13.5px] leading-relaxed">
-              {/* Community Teachers QR Code Action Card in Settings */}
-              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5 flex items-center justify-between gap-3 shadow-2xs">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-xl bg-[#E6F4ED] border border-[#C2E4D2] flex items-center justify-center text-[#157A4C] shrink-0">
-                    <QrCode className="w-5 h-5 stroke-[2.2]" />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-[13.5px] font-bold text-[#1A241D] leading-tight">
-                      {getActiveLanguage().name} Community Teachers
-                    </span>
-                    <span className="text-[11.5px] text-[#556358] truncate mt-0.5 font-mono">
-                      {getActiveLanguage().domainUrl}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowTeachersQrModal(true)}
-                  className="py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] active:scale-95 text-white text-xs font-bold shrink-0 transition flex items-center gap-1.5 shadow-2xs"
-                  title="Open Community Teachers QR Code"
-                  aria-label="Open Community Teachers QR Code"
-                >
-                  <QrCode className="w-3.5 h-3.5" />
-                  <span>Show QR</span>
-                </button>
-              </div>
-
-              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5">
-                <h3 className="font-bold text-[#157A4C] flex items-center gap-1.5 mb-1">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Community Language Preservation Prototype</span>
-                </h3>
-                <p className="text-[#3C473F] text-[12.5px]">
-                  Community Teachers helps speakers record and write {getActiveLanguage().name} words and phrases. Recordings and text are stored locally on your device.
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5">
-                <h3 className="font-bold text-[#6E4BC3] flex items-center gap-1.5 mb-1">
-                  <Database className="w-4 h-4" />
-                  <span>Sample &amp; Local Data</span>
-                </h3>
-                <p className="text-[#3C473F] text-[12.5px]">
-                  Initial library words are marked <strong>Sample</strong> until community review is connected. You have added {stats.localContributionsCount} local contributions on this device.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={handleResetData}
-                className="px-4 py-2.5 rounded-xl bg-white border border-[#D8CFC0] hover:bg-[#F3EDE0] text-[#3A453D] text-[13px] font-bold flex items-center gap-1.5"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Reset Lesson List</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowSystemModal(false)}
-                className="px-5 py-2.5 rounded-xl bg-[#157A4C] text-white text-[13.5px] font-bold"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Community Teachers Homepage QR Code Modal */}
-      <QRCodeModal
-        isOpen={showTeachersQrModal}
-        onClose={() => setShowTeachersQrModal(false)}
-        type="teachers"
-        targetUrl={getActiveLanguage().domainUrl}
-      />
+      {renderSystemModals()}
 
       <PWAInstallPrompt />
     </div>

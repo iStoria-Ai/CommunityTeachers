@@ -18,6 +18,7 @@ import {
   stopActivePlayback,
   formatDuration,
   MicrophoneRecorder,
+  releaseMicrophoneStream,
   getCachedSessionAudio
 } from '../services/audioService';
 import { WordIllustration } from '../components/WordIllustration';
@@ -65,6 +66,8 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
 
   // Audio recording state (for "Needs Voice" mode)
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingMic, setIsStartingMic] = useState(false);
+  const isStartingMicRef = useRef(false);
   const [recordSec, setRecordSec] = useState(0);
   const [capturedAudioUrl, setCapturedAudioUrl] = useState<string | undefined>(undefined);
   const [capturedDuration, setCapturedDuration] = useState(3);
@@ -85,6 +88,8 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
   useEffect(() => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
+      recorderRef.current?.cancel();
+      releaseMicrophoneStream();
       stopActivePlayback();
       setIsLoadingAudio(false);
       setIsPlaying(false);
@@ -210,23 +215,31 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
   const handleToggleRecordForWrittenEntry = async () => {
     if (isSubmitting) return;
     if (!isRecording) {
-      stopActivePlayback();
-      setIsLoadingAudio(false);
-      const recorder = new MicrophoneRecorder();
-      recorderRef.current = recorder;
-      const startRes = await recorder.start();
-      if (!startRes.ok) {
-        recorderRef.current = null;
-        showTransientMessage(
-          startRes.errorMessage || 'Microphone access was denied. Please check permissions.'
-        );
-        return;
+      if (isStartingMicRef.current) return;
+      isStartingMicRef.current = true;
+      setIsStartingMic(true);
+      try {
+        stopActivePlayback();
+        setIsLoadingAudio(false);
+        const recorder = new MicrophoneRecorder();
+        recorderRef.current = recorder;
+        const startRes = await recorder.start();
+        if (!startRes.ok) {
+          recorderRef.current = null;
+          showTransientMessage(
+            startRes.errorMessage || 'Microphone access was denied. Please check permissions.'
+          );
+          return;
+        }
+        setIsRecording(true);
+        setRecordSec(0);
+        timerRef.current = window.setInterval(() => {
+          setRecordSec((s) => s + 1);
+        }, 1000);
+      } finally {
+        isStartingMicRef.current = false;
+        setIsStartingMic(false);
       }
-      setIsRecording(true);
-      setRecordSec(0);
-      timerRef.current = window.setInterval(() => {
-        setRecordSec((s) => s + 1);
-      }, 1000);
     } else {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -319,6 +332,9 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
           type="button"
           onClick={() => {
             stopActivePlayback();
+            recorderRef.current?.cancel();
+            releaseMicrophoneStream();
+            setIsRecording(false);
             setHelpMode('write');
             setCurrentIndex(0);
           }}
@@ -539,8 +555,9 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
               <div className="flex flex-col items-center py-2">
                 <button
                   type="button"
+                  disabled={isStartingMic}
                   onClick={handleToggleRecordForWrittenEntry}
-                  className={`w-24 h-24 rounded-full flex items-center justify-center shadow-lg border-4 transition ${
+                  className={`w-24 h-24 rounded-full flex items-center justify-center shadow-lg border-4 transition disabled:opacity-75 ${
                     isRecording
                       ? 'bg-[#C93B2B] border-[#F8D7D3] animate-pulse'
                       : 'bg-[#1D6CE0] hover:bg-[#1658B8] border-[#D3E3FC]'
@@ -555,6 +572,8 @@ export const HelpOthersScreen: React.FC<HelpOthersScreenProps> = ({
                 <span className="text-[14px] font-bold text-[#2E3B32] mt-2.5">
                   {isRecording
                     ? `Recording... ${formatDuration(recordSec)} (Tap to stop)`
+                    : isStartingMic
+                    ? 'Starting microphone…'
                     : capturedAudioUrl
                     ? 'Voice recorded! Tap Save below or tap mic to re-record'
                     : 'Tap microphone to record pronunciation'}

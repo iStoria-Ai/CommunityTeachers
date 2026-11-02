@@ -32,6 +32,7 @@ import {
   playEnglishPronunciation,
   EnglishSpeechSpeed,
   MicrophoneRecorder,
+  releaseMicrophoneStream,
   playAudioRecording,
   stopActivePlayback,
   revokeAudioObjectUrl,
@@ -85,6 +86,8 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
 
   // Real microphone recording states
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingMic, setIsStartingMic] = useState(false);
+  const isStartingMicRef = useRef(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | undefined>(undefined);
   const [recordedObjectUrl, setRecordedObjectUrl] = useState<string | undefined>(undefined);
@@ -218,6 +221,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
       recorderRef.current?.cancel();
+      releaseMicrophoneStream();
       stopActivePlayback();
       stopEnglishRef.current?.();
       stopEnglishPrompt();
@@ -226,7 +230,7 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
   }, []);
 
   const handlePlayEnglishQuestion = (speedOverride?: EnglishSpeechSpeed) => {
-    if (isRecording) return;
+    if (isRecording || isStartingMic) return;
     setRecordingError(null);
     const speed = speedOverride || englishSpeed;
     if (stopEnglishRef.current) {
@@ -244,42 +248,48 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
     setRecordingError(null);
 
     if (!isRecording) {
-      if (questionCheckLock.current) return;
-      questionCheckLock.current = true;
-      try {
-        const ids = new Set(await fetchAnsweredQuestions());
-        setAnsweredIds(ids);
-        if (nextUnansweredQuestion([currentQuestion], ids) < 0) { setRecordingError('Another community member already answered this question. Moving to an unanswered question.'); return; }
-      } catch (error) { setSharedError(String(error)); setAnsweredIds(null); return; }
-      finally { questionCheckLock.current = false; }
-      // Stop any active playback or English question TTS before starting the microphone
-      stopActivePlayback();
-      stopEnglishRef.current?.();
-      stopEnglishPrompt();
-      setIsPlayingEnglish(false);
-      cleanupCurrentObjectUrl();
-      setRecordedAudioUrl(undefined);
-      setRecordedDuration(0);
-
-      const recorder = new MicrophoneRecorder();
-      recorderRef.current = recorder;
-
-      const startResult = await recorder.start();
-      if (!startResult.ok) {
-        recorderRef.current = null;
-        setIsRecording(false);
-        setRecordingError(
-          startResult.errorMessage ||
-            'Unable to access the microphone. Please check your browser permissions and try again.'
-        );
+      if (isStartingMicRef.current || questionCheckLock.current) return;
+      if (currentQuestion && isQuestionAnswered(currentQuestion, effectiveAnsweredIds)) {
+        setRecordingError('Another community member already answered this question. Moving to an unanswered question.');
         return;
       }
 
-      setIsRecording(true);
-      setRecordingSeconds(0);
-      timerRef.current = window.setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
-      }, 1000);
+      isStartingMicRef.current = true;
+      setIsStartingMic(true);
+
+      try {
+        // Stop any active playback or English question TTS before starting the microphone
+        stopActivePlayback();
+        stopEnglishRef.current?.();
+        stopEnglishPrompt();
+        setIsPlayingEnglish(false);
+        cleanupCurrentObjectUrl();
+        setRecordedAudioUrl(undefined);
+        setRecordedDuration(0);
+
+        const recorder = new MicrophoneRecorder();
+        recorderRef.current = recorder;
+
+        const startResult = await recorder.start();
+        if (!startResult.ok) {
+          recorderRef.current = null;
+          setIsRecording(false);
+          setRecordingError(
+            startResult.errorMessage ||
+              'Unable to access the microphone. Please check your browser permissions and try again.'
+          );
+          return;
+        }
+
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        timerRef.current = window.setInterval(() => {
+          setRecordingSeconds((prev) => prev + 1);
+        }, 1000);
+      } finally {
+        isStartingMicRef.current = false;
+        setIsStartingMic(false);
+      }
     } else {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -637,9 +647,10 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                   )}
                   <button
                     type="button"
+                    disabled={isStartingMic}
                     onClick={handleToggleRecording}
                     aria-label={isRecording ? 'Stop recording' : `Start recording ${lang.name} translation`}
-                    className={`relative z-10 w-[96px] h-[96px] rounded-full flex items-center justify-center shadow-lg border-4 transition-all ${
+                    className={`relative z-10 w-[96px] h-[96px] rounded-full flex items-center justify-center shadow-lg border-4 transition-all disabled:opacity-75 ${
                       isRecording
                         ? 'bg-[#C93B2B] border-[#F8D7D3] scale-105'
                         : 'bg-[#1F8A58] hover:bg-[#157A4C] border-[#D7EFE2] active:scale-95'
@@ -656,6 +667,8 @@ export const TeachEdoScreen: React.FC<TeachEdoScreenProps> = ({
                 <p className="mt-2.5 text-[15px] font-bold text-[#2B372E]">
                   {isRecording
                     ? `Recording... ${formatDuration(recordingSeconds)} (Tap to stop)`
+                    : isStartingMic
+                    ? 'Starting microphone…'
                     : 'Tap to record (or tap & hold)'}
                 </p>
               </div>

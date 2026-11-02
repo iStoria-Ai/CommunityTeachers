@@ -14,6 +14,7 @@ import { EdoLetterBar } from '../components/EdoLetterBar';
 import { getActiveLanguage } from '../languages';
 import {
   MicrophoneRecorder,
+  releaseMicrophoneStream,
   playAudioRecording,
   stopActivePlayback,
   formatDuration
@@ -40,6 +41,8 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
   const [englishOrMainText, setEnglishOrMainText] = useState('');
   const [optionalEdoSpelling, setOptionalEdoSpelling] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingMic, setIsStartingMic] = useState(false);
+  const isStartingMicRef = useRef(false);
   const [recordingSec, setRecordingSec] = useState(0);
   const [audioDataUrl, setAudioDataUrl] = useState<string | undefined>(undefined);
   const [audioDuration, setAudioDuration] = useState(3);
@@ -53,6 +56,8 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
   useEffect(() => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
+      recorderRef.current?.cancel();
+      releaseMicrophoneStream();
       stopActivePlayback();
     };
   }, []);
@@ -60,22 +65,30 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
   const handleToggleMic = async () => {
     setSavedNotice(null);
     if (!isRecording) {
-      stopActivePlayback();
-      const recorder = new MicrophoneRecorder();
-      recorderRef.current = recorder;
-      const startRes = await recorder.start();
-      if (!startRes.ok) {
-        recorderRef.current = null;
-        setSavedNotice(
-          startRes.errorMessage || 'Microphone access was denied. Please check permissions.'
-        );
-        return;
+      if (isStartingMicRef.current) return;
+      isStartingMicRef.current = true;
+      setIsStartingMic(true);
+      try {
+        stopActivePlayback();
+        const recorder = new MicrophoneRecorder();
+        recorderRef.current = recorder;
+        const startRes = await recorder.start();
+        if (!startRes.ok) {
+          recorderRef.current = null;
+          setSavedNotice(
+            startRes.errorMessage || 'Microphone access was denied. Please check permissions.'
+          );
+          return;
+        }
+        setIsRecording(true);
+        setRecordingSec(0);
+        timerRef.current = window.setInterval(() => {
+          setRecordingSec((s) => s + 1);
+        }, 1000);
+      } finally {
+        isStartingMicRef.current = false;
+        setIsStartingMic(false);
       }
-      setIsRecording(true);
-      setRecordingSec(0);
-      timerRef.current = window.setInterval(() => {
-        setRecordingSec((s) => s + 1);
-      }, 1000);
     } else {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -266,8 +279,9 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
             <div className="flex flex-col items-center shrink-0">
               <button
                 type="button"
+                disabled={isStartingMic}
                 onClick={handleToggleMic}
-                className={`w-[88px] h-[88px] rounded-full flex items-center justify-center shadow-lg border-4 transition ${
+                className={`w-[88px] h-[88px] rounded-full flex items-center justify-center shadow-lg border-4 transition disabled:opacity-75 ${
                   isRecording
                     ? 'bg-[#C93B2B] border-[#F8D7D3] animate-pulse'
                     : 'bg-[#1F8A58] hover:bg-[#157A4C] border-[#D7EFE2] active:scale-95'
@@ -282,6 +296,8 @@ export const TeachSomethingElseScreen: React.FC<TeachSomethingElseScreenProps> =
               <span className="text-[13px] font-bold text-[#2E3A31] mt-1.5 text-center">
                 {isRecording
                   ? `Recording ${formatDuration(recordingSec)}`
+                  : isStartingMic
+                  ? 'Starting…'
                   : 'Tap to record'}
               </span>
             </div>
