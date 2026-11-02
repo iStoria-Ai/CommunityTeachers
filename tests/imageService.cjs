@@ -168,30 +168,47 @@ for (const bw of bodyKeywords) {
 }
 console.log('✓ Verified Human Body images (Teeth, Tongue, Hand, Eye, etc.) resolve to human images, not animals.');
 
-// Test 8b: Missing unbundled images such as Pig and Corn return 'missing'
-assert.equal(getImageStatus({ english: 'Pig' }), 'missing', 'Unbundled item "Pig" must return status "missing"');
+// Test 8a3: Specific requested vocabulary items (Mirror, Pig, Pigs, A, B, Friend) must be ready
+assert.equal(getImageStatus({ english: 'Mirror' }), 'ready', 'Bundled item "Mirror" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Pig' }), 'ready', 'Bundled item "Pig" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Pigs' }), 'ready', 'Bundled item "Pigs" must have status "ready"');
+assert.equal(getImageStatus({ english: 'Friend' }), 'ready', 'Bundled item "Friend" must have status "ready"');
+assert.equal(getImageStatus({ english: 'A', id: 'letter-a' }), 'ready', 'Alphabet item "A" must have status "ready"');
+assert.equal(getImageStatus({ english: 'B', id: 'letter-b' }), 'ready', 'Alphabet item "B" must have status "ready"');
+
+assert.ok(getVocabularyImageUrl({ english: 'Mirror' }).includes('home-mirror.jpg'), 'Mirror must resolve to home-mirror.jpg');
+assert.ok(getVocabularyImageUrl({ english: 'Pig' }).includes('animal-pig.jpg'), 'Pig must resolve to animal-pig.jpg');
+assert.ok(getVocabularyImageUrl({ english: 'Pigs' }).includes('animal-pig.jpg'), 'Pigs must resolve to animal-pig.jpg');
+assert.ok(getVocabularyImageUrl({ english: 'Friend' }).includes('family-friend.jpg'), 'Friend must resolve to family-friend.jpg');
+assert.ok(getVocabularyImageUrl({ english: 'A', id: 'letter-a' }).includes('letter-a.jpg'), 'Letter A must resolve to letter-a.jpg');
+assert.ok(getVocabularyImageUrl({ english: 'B', id: 'letter-b' }).includes('letter-b.jpg'), 'Letter B must resolve to letter-b.jpg');
+console.log('✓ Verified specific vocabulary (Mirror, Pig, Pigs, Friend, A, B) resolve and return status "ready".');
+
+// Test 8b: Truly unbundled/missing images return 'missing'
 assert.equal(getImageStatus({ english: 'Corn' }), 'missing', 'Unbundled item "Corn" must return status "missing"');
-console.log('✓ Verified unbundled/missing images (Pig, Corn) start with status "missing".');
+assert.equal(getImageStatus({ english: 'Cassava' }), 'missing', 'Unbundled item "Cassava" must return status "missing"');
+console.log('✓ Verified unbundled/missing images (Corn, Cassava) start with status "missing".');
 
 // Test 8c: Real-time status subscription and single-item retry
 let receivedStatus = '';
 const unsubscribe = subscribeImageUpdates((norm, url, status) => {
-  if (norm === 'pig') {
+  if (norm === 'corn') {
     receivedStatus = status;
   }
 });
 
-// Calling retry on Pig emits 'downloading'
-const retryPromise = retryImageDownload('Pig', 'Animals');
-assert.equal(getImageStatus({ english: 'Pig' }), 'downloading', 'In-flight retry must report status "downloading"');
+// Calling retry on Corn emits 'downloading'
+const retryPromise = retryImageDownload('Corn', 'Food');
+assert.equal(getImageStatus({ english: 'Corn' }), 'downloading', 'In-flight retry must report status "downloading"');
 assert.equal(receivedStatus, 'downloading', 'Status update listener must receive "downloading" event');
 unsubscribe();
 
-// Ensure other images like Corn, Teeth and Dog remain unaffected
-assert.equal(getImageStatus({ english: 'Corn' }), 'missing', 'Other missing images like Corn must remain unaffected');
+// Ensure other images like Cassava, Teeth, Pig and Dog remain unaffected
+assert.equal(getImageStatus({ english: 'Cassava' }), 'missing', 'Other missing images like Cassava must remain unaffected');
 assert.equal(getImageStatus({ english: 'Teeth' }), 'ready', 'Human Body Teeth must remain ready and unaffected');
+assert.equal(getImageStatus({ english: 'Pig' }), 'ready', 'Bundled Pig must remain ready and unaffected');
 assert.equal(getImageStatus({ english: 'Dog' }), 'ready', 'Existing images like Dog must remain unaffected');
-console.log('✓ Verified single-item retry: retrying "Pig" does not affect "Corn", "Teeth" or "Dog".');
+console.log('✓ Verified single-item retry: retrying "Corn" does not affect "Cassava", "Teeth", "Pig" or "Dog".');
 
 console.log(`✓ All ${verifiedCount} starter asset files are present. File size does not verify the pictured subject.`);
 console.log('=== BUNDLED VOCABULARY ASSET & SMART IMAGE DETECTION TESTS PASSED ===\n');

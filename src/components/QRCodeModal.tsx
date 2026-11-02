@@ -109,9 +109,9 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
           Scan to open on your phone or tablet
         </p>
 
-        {/* QR Code Container (Crisp White Card) */}
-        <div className="flex flex-col items-center justify-center p-3.5 bg-white rounded-2xl border border-[#E4DCB] shadow-2xs">
-          <div className="w-[190px] h-[190px] sm:w-[205px] sm:h-[205px] flex items-center justify-center">
+        {/* QR Code Container (Crisp White Card with 4-Module Quiet Zone) */}
+        <div className="flex flex-col items-center justify-center p-3 sm:p-4 bg-white rounded-2xl border border-[#E4DCCB] shadow-2xs">
+          <div className="w-[195px] h-[195px] sm:w-[215px] sm:h-[215px] flex items-center justify-center bg-white p-1">
             <svg
               viewBox={`0 0 ${qrSvg.viewBoxSize} ${qrSvg.viewBoxSize}`}
               className="w-full h-full"
@@ -126,10 +126,10 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
                 height={qrSvg.viewBoxSize}
                 fill="#FFFFFF"
               />
-              <path d={qrSvg.path} fill="#18241B" />
+              <path d={qrSvg.path} fill="#0F1712" />
             </svg>
           </div>
-          <span className="mt-1 text-[11px] font-mono text-[#7D8880] truncate max-w-[240px]">
+          <span className="mt-1 text-[11px] font-mono text-[#556259] truncate max-w-[260px]">
             {resolvedUrl}
           </span>
         </div>

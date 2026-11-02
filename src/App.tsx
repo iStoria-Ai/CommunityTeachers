@@ -7,8 +7,10 @@ import {
   X,
   CheckCircle2,
   Database,
-  CloudOff
+  CloudOff,
+  QrCode
 } from 'lucide-react';
+import { QRCodeModal } from './components/QRCodeModal';
 import {
   uploadRecordingToGateway,
   streamAudioFromGateway,
@@ -86,6 +88,7 @@ export const App: React.FC = () => {
   const [storageError, setStorageError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showSystemModal, setShowSystemModal] = useState(false);
+  const [showTeachersQrModal, setShowTeachersQrModal] = useState(false);
 
   const [community, setCommunity] = useState<CommunitySnapshot | null>(null);
   const [communityError, setCommunityError] = useState('');
@@ -961,6 +964,33 @@ export const App: React.FC = () => {
             </div>
 
             <div className="mt-4 space-y-3 text-[13.5px] leading-relaxed">
+              {/* Community Teachers QR Code Action Card in Settings */}
+              <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-[#E6F4ED] border border-[#C2E4D2] flex items-center justify-center text-[#157A4C] shrink-0">
+                    <QrCode className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[13.5px] font-bold text-[#1A241D] leading-tight">
+                      {getActiveLanguage().name} Community Teachers
+                    </span>
+                    <span className="text-[11.5px] text-[#556358] truncate mt-0.5 font-mono">
+                      {getActiveLanguage().domainUrl}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTeachersQrModal(true)}
+                  className="py-1.5 px-3 rounded-xl bg-[#157A4C] hover:bg-[#126941] active:scale-95 text-white text-xs font-bold shrink-0 transition flex items-center gap-1.5 shadow-2xs"
+                  title="Open Community Teachers QR Code"
+                  aria-label="Open Community Teachers QR Code"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Show QR</span>
+                </button>
+              </div>
+
               <div className="rounded-2xl bg-white border border-[#E5DEC9] p-3.5">
                 <h3 className="font-bold text-[#157A4C] flex items-center gap-1.5 mb-1">
                   <CheckCircle2 className="w-4 h-4" />
@@ -1003,6 +1033,14 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Community Teachers Homepage QR Code Modal */}
+      <QRCodeModal
+        isOpen={showTeachersQrModal}
+        onClose={() => setShowTeachersQrModal(false)}
+        type="teachers"
+        targetUrl={getActiveLanguage().domainUrl}
+      />
     </div>
   );
 };

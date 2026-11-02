@@ -211,6 +211,10 @@ const CURATED_IMAGE_FILENAMES: Record<string, string> = {
   'birds': 'animal-bird.jpg',
   'goat': 'animal-goat.jpg',
   'goats': 'animal-goat.jpg',
+  'pig': 'animal-pig.jpg',
+  'pigs': 'animal-pig.jpg',
+  'mirror': 'home-mirror.jpg',
+  'mirrors': 'home-mirror.jpg',
   'shirt': 'clothes-shirt.jpg',
   'shoes': 'clothes-shoes.jpg',
   'today': 'time-today.jpg',
@@ -226,9 +230,84 @@ for (const item of (starterVocabularyData as Array<{ id: string; english: string
   }
 }
 
-const ONLINE_IMAGES_CACHE_KEY = 'edo_online_vocabulary_images_v1';
+function getLangPrefix(): string {
+  try {
+    return getActiveLanguage().storagePrefix;
+  } catch {
+    return 'edo';
+  }
+}
 
-// In-memory image registry and state
+function getLangId(): string {
+  try {
+    return getActiveLanguage().id;
+  } catch {
+    return 'edo';
+  }
+}
+
+function getOnlineImagesCacheKey(): string {
+  return `${getLangPrefix()}_online_vocabulary_images_v1`;
+}
+
+function getPendingSyncKey(): string {
+  return `${getLangPrefix()}_pending_image_sync_v1`;
+}
+
+function cacheKey(norm: string): string {
+  return `${getLangId()}:${norm}`;
+}
+
+export interface PendingImageSync {
+  english: string;
+  category?: string;
+  vocabId?: string;
+  sourceUrl: string;
+  norm: string;
+  retries: number;
+  lastAttempt: number;
+}
+
+function loadPendingImageSyncs(): PendingImageSync[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(getPendingSyncKey());
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingImageSyncs(list: PendingImageSync[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (list.length === 0) {
+      localStorage.removeItem(getPendingSyncKey());
+    } else {
+      localStorage.setItem(getPendingSyncKey(), JSON.stringify(list));
+    }
+  } catch {}
+}
+
+function enqueuePendingImageSync(item: { english: string; category?: string; vocabId?: string; sourceUrl: string; norm: string }): void {
+  const list = loadPendingImageSyncs();
+  const existingIdx = list.findIndex(p => p.norm === item.norm);
+  if (existingIdx !== -1) {
+    list[existingIdx] = { ...list[existingIdx], ...item, lastAttempt: Date.now() };
+  } else {
+    list.push({ ...item, retries: 0, lastAttempt: Date.now() });
+  }
+  savePendingImageSyncs(list);
+}
+
+function removePendingImageSync(norm: string): void {
+  const list = loadPendingImageSyncs().filter(p => p.norm !== norm);
+  savePendingImageSyncs(list);
+}
+
+// In-memory image registry and state (namespaced by language in cacheKey)
 const inMemoryCache = new Map<string, string>();
 const sharedCloudIndex = new Map<string, CloudImageEntry>();
 const failedSearches = new Set<string>();
@@ -361,15 +440,17 @@ function resolveImage(params: ImageParams): { url: string; isPlaceholder: boolea
   if (params.english) {
     const norm = normalizeEnglish(params.english);
 
+    const cKey = cacheKey(norm);
+
     // In-memory cache check (0ms immediate return)
-    if (inMemoryCache.has(norm)) {
-      return { url: inMemoryCache.get(norm)!, isPlaceholder: false };
+    if (inMemoryCache.has(cKey)) {
+      return { url: inMemoryCache.get(cKey)!, isPlaceholder: false };
     }
 
     // Shared Google Drive image index check
-    const cloudEntry = sharedCloudIndex.get(norm);
+    const cloudEntry = sharedCloudIndex.get(cKey);
     if (cloudEntry && cloudEntry.status === 'ready' && cloudEntry.url) {
-      inMemoryCache.set(norm, cloudEntry.url);
+      inMemoryCache.set(cKey, cloudEntry.url);
       return { url: cloudEntry.url, isPlaceholder: false };
     }
 
@@ -390,11 +471,15 @@ function resolveImage(params: ImageParams): { url: string; isPlaceholder: boolea
     // Check persistent storage for dynamically discovered images
     try {
       if (!params.skipLocalCache && typeof localStorage !== 'undefined') {
-        const cached = localStorage.getItem(ONLINE_IMAGES_CACHE_KEY);
+        const key = getOnlineImagesCacheKey();
+        let cached = localStorage.getItem(key);
+        if (!cached && getLangId() === 'edo') {
+          cached = localStorage.getItem('edo_online_vocabulary_images_v1');
+        }
         if (cached) {
           const map = JSON.parse(cached);
           if (typeof map[norm] === 'string' && /^https:\/\//.test(map[norm])) {
-            inMemoryCache.set(norm, map[norm]);
+            inMemoryCache.set(cKey, map[norm]);
             return { url: map[norm], isPlaceholder: false };
           }
         }
@@ -469,6 +554,9 @@ export function prioritizeImageDiscovery(englishWords: string[]): void {
  */
 export function enqueueImageDiscovery(english: string, category?: string, id?: string): void {
   if (imageServiceReadOnly) return;
+  if (category === 'Alphabet' || (english && english.trim().length === 1 && /^[a-zA-Z]$/.test(english.trim()))) {
+    return; // Alphabet letters use standardized letter cards, never online discovery
+  }
   const norm = normalizeEnglish(english);
   if (!norm) return;
   if (hasRealImage({ english, id })) return;
@@ -504,7 +592,7 @@ function processImageDiscoveryQueue(): void {
       try {
         const url = await discoverOnlineVocabularyImage(item.english, item.category, item.id);
         if (url) {
-          inMemoryCache.set(norm, url);
+          inMemoryCache.set(cacheKey(norm), url);
           notifyImageListeners(norm, url, 'ready');
         } else {
           failedSearches.add(norm);
@@ -533,6 +621,9 @@ function processImageDiscoveryQueue(): void {
  * Uses Wikimedia Commons API (CC0 / CC-BY, free, CORS-enabled, no API key).
  */
 export async function discoverOnlineVocabularyImage(englishWord: string, category?: string, id?: string): Promise<string | null> {
+  if (category === 'Alphabet' || (englishWord && englishWord.trim().length === 1 && /^[a-zA-Z]$/.test(englishWord.trim()))) {
+    return null; // Single letters and alphabet items use standardized cards
+  }
   const norm = normalizeEnglish(englishWord);
   if (!norm || norm === 'yam') return null;
   if (imageServiceReadOnly) return null;
@@ -541,24 +632,30 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
   const resolved = resolveImage({ english: englishWord, id });
   if (resolved.url && !resolved.isPlaceholder) return resolved.url;
 
+  const cKey = cacheKey(norm);
+
   // Check in-memory cache
-  if (inMemoryCache.has(norm)) return inMemoryCache.get(norm)!;
+  if (inMemoryCache.has(cKey)) return inMemoryCache.get(cKey)!;
 
   // Check shared cloud index
-  const cloud = sharedCloudIndex.get(norm);
+  const cloud = sharedCloudIndex.get(cKey);
   if (cloud && cloud.status === 'ready' && cloud.url) {
-    inMemoryCache.set(norm, cloud.url);
+    inMemoryCache.set(cKey, cloud.url);
     return cloud.url;
   }
 
   // Check cached dynamic images in localStorage
   try {
     if (typeof localStorage !== 'undefined') {
-      const cached = localStorage.getItem(ONLINE_IMAGES_CACHE_KEY);
+      const key = getOnlineImagesCacheKey();
+      let cached = localStorage.getItem(key);
+      if (!cached && getLangId() === 'edo') {
+        cached = localStorage.getItem('edo_online_vocabulary_images_v1');
+      }
       if (cached) {
         const map = JSON.parse(cached);
         if (map[norm]) {
-          inMemoryCache.set(norm, map[norm]);
+          inMemoryCache.set(cKey, map[norm]);
           return map[norm];
         }
       }
@@ -567,9 +664,12 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
 
   // Check persistent storage snapshot
   try {
-    const stored = await readLibrarySnapshot('edo_vocabulary_image_' + norm);
+    let stored = await readLibrarySnapshot(`${getLangPrefix()}_vocabulary_image_${norm}`);
+    if (!stored && getLangId() === 'edo') {
+      stored = await readLibrarySnapshot('edo_vocabulary_image_' + norm);
+    }
     if (stored && typeof stored === 'string' && stored.startsWith('http')) {
-      inMemoryCache.set(norm, stored);
+      inMemoryCache.set(cKey, stored);
       return stored;
     }
   } catch (_) { }
@@ -665,6 +765,48 @@ export async function discoverOnlineVocabularyImage(englishWord: string, categor
   return null;
 }
 
+export async function processPendingImageSync(): Promise<number> {
+  if (imageServiceReadOnly) return 0;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+  const list = loadPendingImageSyncs();
+  if (list.length === 0) return 0;
+
+  let syncedCount = 0;
+  const remaining: PendingImageSync[] = [];
+
+  for (const item of list) {
+    if (item.retries >= 5) {
+      // Keep in queue but skip until next cycle if max retries reached
+      remaining.push(item);
+      continue;
+    }
+    try {
+      const cloudResp = await saveCloudVocabularyImage({
+        english: item.english,
+        category: item.category,
+        vocabId: item.vocabId,
+        sourceUrl: item.sourceUrl
+      });
+      if (cloudResp.ok && cloudResp.entry && isTrustedImageUrl(cloudResp.entry.url)) {
+        const cKey = cacheKey(item.norm);
+        sharedCloudIndex.set(cKey, cloudResp.entry);
+        if (cloudResp.entry.url) {
+          inMemoryCache.set(cKey, cloudResp.entry.url);
+          notifyImageListeners(item.norm, cloudResp.entry.url, 'ready');
+        }
+        syncedCount++;
+      } else {
+        remaining.push({ ...item, retries: item.retries + 1, lastAttempt: Date.now() });
+      }
+    } catch {
+      remaining.push({ ...item, retries: item.retries + 1, lastAttempt: Date.now() });
+    }
+  }
+
+  savePendingImageSyncs(remaining);
+  return syncedCount;
+}
+
 async function saveDiscoveredImage(
   norm: string,
   url: string,
@@ -673,36 +815,47 @@ async function saveDiscoveredImage(
   vocabId?: string
 ): Promise<void> {
   if (imageServiceReadOnly) return;
-  inMemoryCache.set(norm, url);
+  const cKey = cacheKey(norm);
+  inMemoryCache.set(cKey, url);
   try {
     if (typeof localStorage !== 'undefined') {
-      const cached = localStorage.getItem(ONLINE_IMAGES_CACHE_KEY);
+      const key = getOnlineImagesCacheKey();
+      const cached = localStorage.getItem(key);
       const map = cached ? JSON.parse(cached) : {};
       map[norm] = url;
-      localStorage.setItem(ONLINE_IMAGES_CACHE_KEY, JSON.stringify(map));
+      localStorage.setItem(key, JSON.stringify(map));
     }
   } catch (_) { }
-  void writeLibrarySnapshot('edo_vocabulary_image_' + norm, url).catch(() => { });
+  void writeLibrarySnapshot(`${getLangPrefix()}_vocabulary_image_${norm}`, url).catch(() => { });
 
   // Persist to shared Google Drive folder and update shared index in background
   // Only licensed Wikimedia images are sent; the backend enforces the same allow-list.
   const isWikimediaSource = /^https:\/\/upload\.wikimedia\.org\//.test(url);
-  if (english && isWikimediaSource && typeof navigator !== 'undefined' && navigator.onLine) {
-    try {
-      const cloudResp = await saveCloudVocabularyImage({
-        english,
-        category,
-        vocabId,
-        sourceUrl: url
-      });
-      if (cloudResp.ok && cloudResp.entry && isTrustedImageUrl(cloudResp.entry.url)) {
-        sharedCloudIndex.set(norm, cloudResp.entry);
-        if (cloudResp.entry.url) {
-          inMemoryCache.set(norm, cloudResp.entry.url);
-          notifyImageListeners(norm, cloudResp.entry.url, 'ready');
+  if (english && isWikimediaSource) {
+    // Keep pending image safely in persistent local queue for guaranteed retry
+    enqueuePendingImageSync({ english, category, vocabId, sourceUrl: url, norm });
+
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        const cloudResp = await saveCloudVocabularyImage({
+          english,
+          category,
+          vocabId,
+          sourceUrl: url
+        });
+        if (cloudResp.ok && cloudResp.entry && isTrustedImageUrl(cloudResp.entry.url)) {
+          // Google Drive confirmed upload: remove from pending queue
+          removePendingImageSync(norm);
+          sharedCloudIndex.set(cKey, cloudResp.entry);
+          if (cloudResp.entry.url) {
+            inMemoryCache.set(cKey, cloudResp.entry.url);
+            notifyImageListeners(norm, cloudResp.entry.url, 'ready');
+          }
         }
+      } catch (_) {
+        // Stays in pending queue to safely retry
       }
-    } catch (_) { }
+    }
   }
 }
 
@@ -722,8 +875,9 @@ function applyIndexEntries(index: CloudImageIndex | null | undefined, notify: bo
     if (!entry || entry.status !== 'ready' || !isTrustedImageUrl(entry.url)) continue;
     // Never replace a working bundled photo with a cloud copy
     if (CURATED_IMAGE_FILENAMES[norm] && !isPlaceholderAssetForWord(norm)) continue;
-    sharedCloudIndex.set(norm, entry);
-    inMemoryCache.set(norm, entry.url);
+    const cKey = cacheKey(norm);
+    sharedCloudIndex.set(cKey, entry);
+    inMemoryCache.set(cKey, entry.url);
     if (notify) notifyImageListeners(norm, entry.url, 'ready');
   }
 }
@@ -737,13 +891,13 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
   if (readOnly) setImageServiceReadOnly(true);
   const writesAllowed = !readOnly && !imageServiceReadOnly;
 
-  const snapshotKey = `${getActiveLanguage().storagePrefix}_image_index_v1`;
+  const snapshotKey = `${getLangPrefix()}_image_index_v1`;
 
-  // 1. Local snapshot first for instant display (Studio only)
+  // 1. Local snapshot first for instant 0ms display across all devices (Studio only)
   if (writesAllowed) {
     try {
       let cachedRaw = await readLibrarySnapshot(snapshotKey);
-      if (!cachedRaw && getActiveLanguage().id === 'edo') {
+      if (!cachedRaw && getLangId() === 'edo') {
         cachedRaw = await readLibrarySnapshot('edo_image_index_v1');
       }
       if (cachedRaw && typeof cachedRaw === 'string') {
@@ -756,7 +910,12 @@ export async function syncSharedImageIndex(readOnly = false): Promise<void> {
     } catch (_) { }
   }
 
-  // 2. Authoritative shared index from Google Drive
+  // 2. Retry any pending uploads to Google Drive if in Studio mode
+  if (writesAllowed) {
+    void processPendingImageSync().catch(() => {});
+  }
+
+  // 3. Authoritative shared index from Google Drive
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
   try {
     const res = await fetchCloudImageIndex();
@@ -787,7 +946,7 @@ export async function retryImageDownload(english: string, category?: string, id?
     const discovered = await discoverOnlineVocabularyImage(english, category, id);
     activeSearches.delete(norm);
     if (discovered) {
-      inMemoryCache.set(norm, discovered);
+      inMemoryCache.set(cacheKey(norm), discovered);
       notifyImageListeners(norm, discovered, 'ready');
       return discovered;
     } else {
